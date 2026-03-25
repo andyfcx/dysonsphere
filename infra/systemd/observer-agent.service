@@ -1,0 +1,24 @@
+[Unit]
+Description=Observer Agent — distributed cron monitoring
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=observer-agent
+Group=observer-agent
+ExecStart=/usr/local/bin/observer-agent run --config /etc/observer-agent/config.yaml
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=observer-agent
+
+# Security hardening
+PrivateTmp=true
+ProtectSystem=full
+NoNewPrivileges=true
+ReadWritePaths=/var/lib/observer-agent
+
+[Install]
+WantedBy=multi-user.target

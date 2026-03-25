@@ -1,0 +1,126 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS binaries (${{ matrix.goarch }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            archive_name: observer-darwin-amd64
+          - goarch: arm64
+            archive_name: observer-darwin-arm64
+
+    env:
+      GOOS: darwin
+      CGO_ENABLED: 0
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.work
+
+      - name: Sync workspace modules
+        run: go work sync
+
+      - name: Build binaries
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p dist/${{ matrix.archive_name }}
+          go build -trimpath -ldflags="-s -w" -o dist/${{ matrix.archive_name }}/observer-server ./apps/server/cmd/server
+          go build -trimpath -ldflags="-s -w" -o dist/${{ matrix.archive_name }}/observer-agent ./apps/agent/cmd/agent
+          cp README.md dist/${{ matrix.archive_name }}/README.md
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive_name }}
+          path: dist/${{ matrix.archive_name }}
+
+  build-linux:
+    name: Build Linux binaries (amd64)
+    runs-on: ubuntu-latest
+
+    env:
+      GOOS: linux
+      GOARCH: amd64
+      CGO_ENABLED: 0
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.work
+
+      - name: Sync workspace modules
+        run: go work sync
+
+      - name: Build binaries
+        run: |
+          mkdir -p dist/observer-linux-amd64
+          go build -trimpath -ldflags="-s -w" -o dist/observer-linux-amd64/observer-server ./apps/server/cmd/server
+          go build -trimpath -ldflags="-s -w" -o dist/observer-linux-amd64/observer-agent ./apps/agent/cmd/agent
+          cp README.md dist/observer-linux-amd64/README.md
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: observer-linux-amd64
+          path: dist/observer-linux-amd64
+
+  release:
+    name: Publish GitHub release
+    needs:
+      - build-macos
+      - build-linux
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          cp -R dist/* release-assets/
+          cd release-assets
+          for dir in observer-darwin-* observer-linux-*; do
+            tar -czf "${dir}.tar.gz" "${dir}"
+            platform_arch="${dir#observer-}"
+            mv "${dir}/observer-server" "observer-server-${platform_arch}"
+            mv "${dir}/observer-agent" "observer-agent-${platform_arch}"
+          done
+          shasum -a 256 *.tar.gz > checksums.txt
+          shasum -a 256 observer-agent-* observer-server-* >> checksums.txt
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-assets/observer-agent-*
+            release-assets/observer-server-*
+            release-assets/*.tar.gz
+            release-assets/checksums.txt
+          generate_release_notes: true

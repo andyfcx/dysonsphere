@@ -1,0 +1,58 @@
+# Sample probe configurations for common monitoring scenarios
+
+probes:
+  # ── Database record count probes ──────────────────────────────────────────
+
+  - name: "weibo_posts_daily"
+    type: "sql_count"
+    schedule: "0 * * * *"
+    sql:
+      dsn: "postgres://user:pass@db-host:5432/weibo_db?sslmode=disable"
+      query: |
+        SELECT COUNT(*)
+        FROM posts
+        WHERE created_at >= CURRENT_DATE
+
+  - name: "twitter_mentions_hourly"
+    type: "sql_count"
+    schedule: "*/30 * * * *"
+    sql:
+      dsn: "postgres://user:pass@db-host:5432/twitter_db?sslmode=disable"
+      query: |
+        SELECT COUNT(*)
+        FROM mentions
+        WHERE fetched_at > NOW() - INTERVAL '1 hour'
+
+  # ── File freshness probes ──────────────────────────────────────────────────
+
+  - name: "latest_crawl_output"
+    type: "file_freshness"
+    schedule: "*/10 * * * *"
+    file:
+      path: "/data/crawl/latest.jsonl"
+      max_age_seconds: 1800   # warn if older than 30 minutes
+
+  - name: "ml_model_checkpoint"
+    type: "file_freshness"
+    schedule: "0 8 * * *"    # check daily
+    file:
+      path: "/models/checkpoint-latest.pt"
+      max_age_seconds: 86400  # warn if older than 1 day
+
+  # ── Custom command probes ──────────────────────────────────────────────────
+
+  - name: "redis_queue_depth"
+    type: "command"
+    schedule: "*/5 * * * *"
+    command:
+      command: "redis-cli"
+      args: ["llen", "job:queue"]
+
+  - name: "disk_usage_percent"
+    type: "command"
+    schedule: "0 * * * *"
+    command:
+      command: "sh"
+      args:
+        - "-c"
+        - "df /data | tail -1 | awk '{print $5}' | tr -d '%'"

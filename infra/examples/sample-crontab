@@ -1,0 +1,20 @@
+# Example crontab fixture used for cron discovery testing
+# This file format is: /etc/crontab or /etc/cron.d/* style
+# Fields: minute hour dom month dow user command
+
+CRON_TZ=Asia/Taipei
+
+# Daily full backup at 2am
+0 2 * * * root /usr/local/bin/backup.sh --full > /dev/null 2>&1
+
+# Collect data every 5 minutes
+*/5 * * * * www-data /usr/bin/python3 /opt/app/collect.py
+
+# Weekly cleanup on Sundays at midnight
+0 0 * * 0 app /opt/app/cleanup.sh 2>&1
+
+# Daily report at 6am
+0 6 * * * app /opt/app/daily_report.sh
+
+# Hourly health check
+0 * * * * root /usr/local/bin/health-check.sh --quiet > /dev/null 2>&1
