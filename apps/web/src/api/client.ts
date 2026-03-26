@@ -1,15 +1,91 @@
 const BASE = import.meta.env.VITE_API_BASE_URL || ''
-const TOKEN = import.meta.env.VITE_API_TOKEN || 'dev-token'
+const AUTH_TOKEN_KEY = 'observer.auth.token'
+const AUTH_EVENT = 'observer-auth-changed'
 
-async function apiFetch<T>(path: string): Promise<T> {
+function emitAuthChanged() {
+  window.dispatchEvent(new Event(AUTH_EVENT))
+}
+
+export function getAuthToken(): string | null {
+  return window.localStorage.getItem(AUTH_TOKEN_KEY)
+}
+
+export function setAuthToken(token: string) {
+  window.localStorage.setItem(AUTH_TOKEN_KEY, token)
+  emitAuthChanged()
+}
+
+export function clearAuthToken() {
+  window.localStorage.removeItem(AUTH_TOKEN_KEY)
+  emitAuthChanged()
+}
+
+export function subscribeAuthChanged(listener: () => void) {
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === AUTH_TOKEN_KEY) {
+      listener()
+    }
+  }
+
+  window.addEventListener(AUTH_EVENT, listener)
+  window.addEventListener('storage', handleStorage)
+  return () => {
+    window.removeEventListener(AUTH_EVENT, listener)
+    window.removeEventListener('storage', handleStorage)
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getAuthToken()
+  const headers = new Headers(init?.headers)
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  if (init?.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+
   const res = await fetch(`${BASE}${path}`, {
-    headers: { Authorization: `Bearer ${TOKEN}` },
+    ...init,
+    headers,
   })
+
+  if (res.status === 401) {
+    clearAuthToken()
+  }
   if (!res.ok) {
     const body = await res.text()
-    throw new Error(`API ${path} → ${res.status}: ${body}`)
+    throw new Error(`API ${path} -> ${res.status}: ${body}`)
   }
   return res.json()
+}
+
+export interface LoginResult {
+  token: string
+  username: string
+}
+
+export async function login(username: string, password: string): Promise<LoginResult> {
+  return request<LoginResult>('/api/v1/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  })
+}
+
+export async function logout(): Promise<void> {
+  const token = getAuthToken()
+  if (!token) {
+    clearAuthToken()
+    return
+  }
+
+  try {
+    await request<{ ok: boolean }>('/api/v1/auth/logout', {
+      method: 'POST',
+    })
+  } finally {
+    clearAuthToken()
+  }
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -99,11 +175,11 @@ export interface JobDetail {
 // ── API calls ──────────────────────────────────────────────────────────────
 
 export const api = {
-  getStats: () => apiFetch<Stats>('/api/v1/stats'),
-  getHosts: () => apiFetch<Host[]>('/api/v1/hosts'),
-  getJobs: () => apiFetch<Job[]>('/api/v1/jobs'),
-  getJob: (id: string) => apiFetch<JobDetail>(`/api/v1/jobs/${id}`),
-  getExecutions: () => apiFetch<Execution[]>('/api/v1/executions'),
-  getMetrics: () => apiFetch<DataMetric[]>('/api/v1/metrics'),
-  getAlerts: () => apiFetch<Alert[]>('/api/v1/alerts'),
+  getStats: () => request<Stats>('/api/v1/stats'),
+  getHosts: () => request<Host[]>('/api/v1/hosts'),
+  getJobs: () => request<Job[]>('/api/v1/jobs'),
+  getJob: (id: string) => request<JobDetail>(`/api/v1/jobs/${id}`),
+  getExecutions: () => request<Execution[]>('/api/v1/executions'),
+  getMetrics: () => request<DataMetric[]>('/api/v1/metrics'),
+  getAlerts: () => request<Alert[]>('/api/v1/alerts'),
 }

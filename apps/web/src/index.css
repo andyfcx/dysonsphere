@@ -27,6 +27,8 @@ a:hover { text-decoration: underline; }
 .sidebar { width: 220px; background: var(--bg2); border-right: 1px solid var(--border); padding: 20px 0; flex-shrink: 0; }
 .sidebar-logo { padding: 0 20px 24px; font-size: 16px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
 .sidebar-logo span { color: var(--accent); }
+.sidebar-logout { margin: 24px 12px 0; width: calc(100% - 24px); border: 1px solid var(--border); background: transparent; color: var(--text2); border-radius: var(--radius); padding: 10px 12px; cursor: pointer; }
+.sidebar-logout:hover { background: var(--bg3); color: var(--text); }
 .nav-group { padding: 0 12px; margin-bottom: 8px; }
 .nav-label { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.08em; padding: 6px 8px; }
 .nav-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius); color: var(--text2); font-size: 13px; cursor: pointer; transition: all 0.15s; text-decoration: none; }
@@ -100,6 +102,21 @@ tr:hover td { background: var(--bg3); }
 /* Loading / error */
 .loading { color: var(--text2); padding: 16px; }
 .error-msg { color: var(--red); padding: 16px; background: #ef44441a; border-radius: var(--radius); }
+
+/* Auth */
+.auth-shell { min-height: 100%; display: grid; place-items: center; padding: 24px; background:
+  radial-gradient(circle at top, #1f29371f, transparent 40%),
+  linear-gradient(180deg, #0f1117, #151925 60%, #0f1117); }
+.auth-panel { width: min(100%, 420px); background: var(--bg2); border: 1px solid var(--border); border-radius: 16px; padding: 28px; box-shadow: 0 18px 60px #00000040; }
+.auth-brand { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 10px; }
+.auth-title { font-size: 28px; margin-bottom: 8px; }
+.auth-copy { color: var(--text2); margin-bottom: 20px; }
+.auth-form { display: grid; gap: 14px; }
+.auth-label { display: grid; gap: 6px; font-size: 13px; color: var(--text2); }
+.auth-input { width: 100%; border: 1px solid var(--border); background: var(--bg3); color: var(--text); border-radius: 10px; padding: 12px 14px; font: inherit; }
+.auth-input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+.auth-submit { border: 0; background: var(--accent); color: white; border-radius: 10px; padding: 12px 14px; font: inherit; font-weight: 700; cursor: pointer; }
+.auth-submit:disabled { opacity: 0.7; cursor: wait; }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

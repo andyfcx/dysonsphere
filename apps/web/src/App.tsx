@@ -1,10 +1,14 @@
+import { useEffect, useState } from 'react'
 import { Routes, Route, NavLink, useLocation } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import Overview from './pages/Overview'
 import Hosts from './pages/Hosts'
 import Jobs from './pages/Jobs'
 import JobDetail from './pages/JobDetail'
 import Metrics from './pages/Metrics'
 import Alerts from './pages/Alerts'
+import Login from './pages/Login'
+import { getAuthToken, logout, subscribeAuthChanged } from './api/client'
 
 const navItems = [
   { path: '/', label: 'Overview', icon: '⬡' },
@@ -16,6 +20,22 @@ const navItems = [
 
 export default function App() {
   const location = useLocation()
+  const queryClient = useQueryClient()
+  const [token, setToken] = useState<string | null>(() => getAuthToken())
+
+  useEffect(() => {
+    return subscribeAuthChanged(() => {
+      const nextToken = getAuthToken()
+      if (!nextToken) {
+        queryClient.clear()
+      }
+      setToken(nextToken)
+    })
+  }, [queryClient])
+
+  if (!token) {
+    return <Login />
+  }
 
   return (
     <div className="layout">
@@ -37,6 +57,15 @@ export default function App() {
             </NavLink>
           ))}
         </div>
+        <button
+          className="sidebar-logout"
+          type="button"
+          onClick={() => {
+            void logout()
+          }}
+        >
+          Sign out
+        </button>
       </nav>
       <main className="main">
         <Routes>
@@ -51,4 +80,3 @@ export default function App() {
     </div>
   )
 }
-
