@@ -14,6 +14,7 @@ import (
 
 // Handler holds all service dependencies for HTTP handlers.
 type Handler struct {
+	auth       *AuthManager
 	agents     *service.AgentService
 	commands   *service.CommandService
 	discovery  *service.DiscoveryService
@@ -26,6 +27,7 @@ type Handler struct {
 }
 
 func NewHandler(
+	auth *AuthManager,
 	agents *service.AgentService,
 	commands *service.CommandService,
 	discovery *service.DiscoveryService,
@@ -37,6 +39,7 @@ func NewHandler(
 	execs *repository.ExecutionRepo,
 ) *Handler {
 	return &Handler{
+		auth:       auth,
 		agents:     agents,
 		commands:   commands,
 		discovery:  discovery,
@@ -49,7 +52,72 @@ func NewHandler(
 	}
 }
 
+// Login handles POST /api/v1/auth/login
+func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	var req LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.Username == "" || req.Password == "" {
+		writeError(w, http.StatusBadRequest, "username and password are required")
+		return
+	}
+
+	resp, ok := h.auth.Login(req.Username, req.Password)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "invalid username or password")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// Logout handles POST /api/v1/auth/logout
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	h.auth.Logout(bearerToken(r.Header.Get("Authorization")))
+	writeJSON(w, http.StatusOK, OKResponse{OK: true})
+}
+
 // ── Agent ──────────────────────────────────────────────────────────────────
+
+// EnrollAgent handles POST /api/v1/agents/enroll
+func (h *Handler) EnrollAgent(w http.ResponseWriter, r *http.Request) {
+	var req EnrollRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.EnrollmentToken == "" || req.MachineID == "" || req.Hostname == "" {
+		writeError(w, http.StatusBadRequest, "enrollment_token, machine_id, and hostname are required")
+		return
+	}
+
+	result, err := h.agents.Enroll(r.Context(), req.EnrollmentToken, req.toDomain())
+	if err != nil {
+		status := http.StatusUnauthorized
+		if err.Error() == "enrollment token has already been used" {
+			status = http.StatusConflict
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, EnrollResponse{
+		HostID: result.Host.ID,
+		Credential: AgentCredentialBlock{
+			Token: result.AgentToken,
+		},
+		Config: AgentConfigBlock{
+			Environment:         result.Environment,
+			Tags:                result.Tags,
+			HeartbeatInterval:   "30s",
+			DiscoveryInterval:   "5m",
+			ProcessScanInterval: "30s",
+			ReportInterval:      "1m",
+			CommandPollInterval: "15s",
+		},
+	})
+}
 
 // RegisterAgent handles POST /api/v1/agents/register
 func (h *Handler) RegisterAgent(w http.ResponseWriter, r *http.Request) {

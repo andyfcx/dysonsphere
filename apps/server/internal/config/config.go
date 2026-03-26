@@ -14,9 +14,12 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Host  string
-	Port  int
-	Token string
+	Host          string
+	Port          int
+	Token         string
+	EnrollmentToken string
+	LoginUsername string
+	LoginPassword string
 }
 
 type DatabaseConfig struct {
@@ -33,9 +36,12 @@ type DatabaseConfig struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		Server: ServerConfig{
-			Host:  getenv("SERVER_HOST", "0.0.0.0"),
-			Port:  getenvInt("SERVER_PORT", 8000),
-			Token: getenv("SERVER_TOKEN", "dev-token"),
+			Host:          getenv("SERVER_HOST", "0.0.0.0"),
+			Port:          getenvInt("SERVER_PORT", 8000),
+			Token:         getenv("SERVER_TOKEN", "dev-token"),
+			EnrollmentToken: getenv("SERVER_ENROLLMENT_TOKEN", "enroll-dev-token"),
+			LoginUsername: getenv("SERVER_LOGIN_USERNAME", "admin"),
+			LoginPassword: getenv("SERVER_LOGIN_PASSWORD", "admin"),
 		},
 		Database: DatabaseConfig{
 			Host:     getenv("POSTGRES_HOST", "localhost"),
@@ -48,6 +54,15 @@ func Load() (*Config, error) {
 	}
 	if cfg.Server.Token == "" {
 		return nil, fmt.Errorf("SERVER_TOKEN must be set")
+	}
+	if cfg.Server.EnrollmentToken == "" {
+		return nil, fmt.Errorf("SERVER_ENROLLMENT_TOKEN must be set")
+	}
+	if cfg.Server.LoginUsername == "" {
+		return nil, fmt.Errorf("SERVER_LOGIN_USERNAME must be set")
+	}
+	if cfg.Server.LoginPassword == "" {
+		return nil, fmt.Errorf("SERVER_LOGIN_PASSWORD must be set")
 	}
 	return cfg, nil
 }

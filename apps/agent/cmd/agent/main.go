@@ -4,11 +4,9 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -24,6 +22,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/andyfcx/observer/agent/internal/app"
+	"github.com/andyfcx/observer/agent/internal/client"
 	"github.com/andyfcx/observer/agent/internal/config"
 	"github.com/andyfcx/observer/agent/internal/state"
 )
@@ -59,22 +58,20 @@ func main() {
 }
 
 func initCmd() *cobra.Command {
-	var serverURL, token, env, tagsStr, configOut, stateFile string
+	var serverURL, configOut, stateFile, tokenFile string
 
 	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Register this host with the central server and write agent config",
+		Short: "Enroll this host with the central server and write agent config",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return interactiveInit(serverURL, token, env, tagsStr, configOut, stateFile)
+			return interactiveInit(serverURL, configOut, stateFile, tokenFile)
 		},
 	}
 
-	cmd.Flags().StringVar(&serverURL, "server", "", "Central server URL")
-	cmd.Flags().StringVar(&token, "token", "", "Auth token")
-	cmd.Flags().StringVar(&env, "env", "production", "Environment label")
-	cmd.Flags().StringVar(&tagsStr, "tags", "", "Comma-separated tags")
+	cmd.Flags().StringVar(&serverURL, "server", "", "Observer server URL")
 	cmd.Flags().StringVar(&configOut, "config-out", defaultConfigPath, "Path to write config file")
 	cmd.Flags().StringVar(&stateFile, "state-file", "/var/lib/observer-agent/state.db", "Path for local state db")
+	cmd.Flags().StringVar(&tokenFile, "token-file", "", "Path to write formal agent credential")
 	return cmd
 }
 
@@ -197,32 +194,52 @@ func ensureConfig(configPath string) error {
 	}
 
 	fmt.Printf("Config %s not found. Starting interactive setup.\n", configPath)
-	return interactiveInit("", "", "production", "", configPath, "/var/lib/observer-agent/state.db")
+	return interactiveInit("", configPath, "/var/lib/observer-agent/state.db", defaultTokenFile(configPath))
 }
 
-func interactiveInit(serverURL, token, env, tagsStr, configOut, stateFile string) error {
+func interactiveInit(serverURL, configOut, stateFile, tokenFile string) error {
 	reader := bufio.NewReader(os.Stdin)
 	serverURL = prompt(reader, "Server URL", serverURL)
-	token = prompt(reader, "Token", token)
-	env = prompt(reader, "Environment", defaultString(env, "production"))
-	tagsStr = prompt(reader, "Tags (comma-separated)", tagsStr)
-	configOut = prompt(reader, "Config path", defaultString(configOut, defaultConfigPath))
-	stateFile = prompt(reader, "State DB path", defaultString(stateFile, "/var/lib/observer-agent/state.db"))
+	if serverURL == "" {
+		return fmt.Errorf("server URL is required")
+	}
+	if configOut == "" {
+		configOut = defaultConfigPath
+	}
+	if stateFile == "" {
+		stateFile = "/var/lib/observer-agent/state.db"
+	}
+	if tokenFile == "" {
+		tokenFile = defaultTokenFile(configOut)
+	}
 
-	if serverURL == "" || token == "" {
-		return fmt.Errorf("server and token are required")
+	enrollmentToken, err := promptSecret("Enrollment token")
+	if err != nil {
+		return fmt.Errorf("read enrollment token: %w", err)
+	}
+	if enrollmentToken == "" {
+		return fmt.Errorf("enrollment token is required")
 	}
 
 	hostname, _ := os.Hostname()
 	machineID := generateMachineID()
-	tags := parseTags(tagsStr)
-
-	hostID, err := registerHost(serverURL, token, machineID, hostname, env, tags)
+	apiClient := client.NewClient(serverURL, "", "")
+	resp, err := apiClient.Enroll(context.Background(), &client.EnrollRequest{
+		EnrollmentToken: enrollmentToken,
+		MachineID:       machineID,
+		Hostname:        hostname,
+		IPAddress:       "",
+		AgentVersion:    agentVersion,
+	})
 	if err != nil {
-		return fmt.Errorf("registration failed: %w", err)
+		return fmt.Errorf("enrollment failed: %w", err)
 	}
 
-	cfg := buildConfig(serverURL, token, machineID, hostname, env, tags, stateFile)
+	if err := writeCredentialFile(tokenFile, resp.Credential.Token); err != nil {
+		return fmt.Errorf("write credential file: %w", err)
+	}
+
+	cfg := buildConfig(serverURL, tokenFile, machineID, hostname, stateFile, resp)
 	if err := writeConfigFile(configOut, cfg); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
@@ -235,53 +252,14 @@ func interactiveInit(serverURL, token, env, tagsStr, configOut, stateFile string
 		return fmt.Errorf("open state: %w", err)
 	}
 	defer st.Close()
-	if err := st.SetMeta("host_id", hostID); err != nil {
+	if err := st.SetMeta("host_id", resp.HostID); err != nil {
 		return fmt.Errorf("save host_id: %w", err)
 	}
 
-	fmt.Printf("Registered host_id=%s\n", hostID)
+	fmt.Printf("Enrolled host_id=%s\n", resp.HostID)
 	fmt.Printf("Config written to %s\n", configOut)
+	fmt.Printf("Credential written to %s\n", tokenFile)
 	return nil
-}
-
-func registerHost(serverURL, token, machineID, hostname, env string, tags []string) (string, error) {
-	payload := map[string]any{
-		"machine_id":    machineID,
-		"hostname":      hostname,
-		"ip_address":    "",
-		"environment":   env,
-		"tags":          tags,
-		"agent_version": agentVersion,
-	}
-	body, _ := json.Marshal(payload)
-
-	req, err := http.NewRequest("POST", serverURL+"/api/v1/agents/register", strings.NewReader(string(body)))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("server returned %d", resp.StatusCode)
-	}
-
-	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
-	}
-	hostID, _ := result["id"].(string)
-	if hostID == "" {
-		return "", fmt.Errorf("server response missing id")
-	}
-	return hostID, nil
 }
 
 func generateMachineID() string {
@@ -293,38 +271,24 @@ func generateMachineID() string {
 	return uuid.New().String()
 }
 
-func parseTags(s string) []string {
-	if s == "" {
-		return []string{}
-	}
-	parts := strings.Split(s, ",")
-	tags := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if t := strings.TrimSpace(p); t != "" {
-			tags = append(tags, t)
-		}
-	}
-	return tags
-}
-
-func buildConfig(serverURL, token, machineID, hostname, env string, tags []string, stateFile string) map[string]any {
+func buildConfig(serverURL, tokenFile, machineID, hostname, stateFile string, resp *client.EnrollResponse) map[string]any {
 	return map[string]any{
 		"server": map[string]any{
-			"url":   serverURL,
-			"token": token,
+			"url":        serverURL,
+			"token_file": tokenFile,
 		},
 		"agent": map[string]any{
 			"machine_id":            machineID,
 			"hostname":              hostname,
-			"environment":           env,
-			"tags":                  tags,
+			"environment":           resp.Config.Environment,
+			"tags":                  resp.Config.Tags,
 			"version":               agentVersion,
 			"state_file":            stateFile,
-			"heartbeat_interval":    "30s",
-			"discovery_interval":    "5m",
-			"process_scan_interval": "30s",
-			"report_interval":       "1m",
-			"command_poll_interval": "15s",
+			"heartbeat_interval":    defaultValue(resp.Config.HeartbeatInterval, "30s"),
+			"discovery_interval":    defaultValue(resp.Config.DiscoveryInterval, "5m"),
+			"process_scan_interval": defaultValue(resp.Config.ProcessScanInterval, "30s"),
+			"report_interval":       defaultValue(resp.Config.ReportInterval, "1m"),
+			"command_poll_interval": defaultValue(resp.Config.CommandPollInterval, "15s"),
 		},
 		"probes": []any{},
 	}
@@ -334,12 +298,24 @@ func writeConfigFile(path string, cfg any) error {
 	if err := os.MkdirAll(stateDir(path), 0750); err != nil {
 		slog.Warn("could not create config dir", "path", path, "err", err)
 	}
-	f, err := os.Create(path)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	return yaml.NewEncoder(f).Encode(cfg)
+}
+
+func writeCredentialFile(path, token string) error {
+	if err := os.MkdirAll(stateDir(path), 0750); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return yaml.NewEncoder(f).Encode(map[string]any{"token": token})
 }
 
 func printLocalStatus(stateFile string, since time.Duration) error {
@@ -359,16 +335,16 @@ func printLocalStatus(stateFile string, since time.Duration) error {
 	}
 
 	type summary struct {
-		Command    string
-		Schedule   string
-		Status     string
-		Trigger    string
-		LastRun    time.Time
-		UpdatedAt  time.Time
-		Success    int
-		Failed     int
-		Running    int
-		Partial    int
+		Command   string
+		Schedule  string
+		Status    string
+		Trigger   string
+		LastRun   time.Time
+		UpdatedAt time.Time
+		Success   int
+		Failed    int
+		Running   int
+		Partial   int
 	}
 	grouped := map[string]*summary{}
 	for _, rec := range records {
@@ -540,7 +516,33 @@ func prompt(reader *bufio.Reader, label, fallback string) string {
 	return line
 }
 
-func defaultString(value, fallback string) string {
+func promptSecret(label string) (string, error) {
+	fmt.Printf("%s: ", label)
+	disableEcho := exec.Command("stty", "-echo")
+	disableEcho.Stdin = os.Stdin
+	if err := disableEcho.Run(); err != nil {
+		return "", err
+	}
+	defer func() {
+		restoreEcho := exec.Command("stty", "echo")
+		restoreEcho.Stdin = os.Stdin
+		_ = restoreEcho.Run()
+		fmt.Println()
+	}()
+
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
+}
+
+func defaultTokenFile(configPath string) string {
+	return stateDir(configPath) + "/credentials.yaml"
+}
+
+func defaultValue(value, fallback string) string {
 	if value != "" {
 		return value
 	}

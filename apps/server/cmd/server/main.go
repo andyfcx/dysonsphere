@@ -81,9 +81,10 @@ func run() error {
 	metricRepo := repository.NewMetricRepo(pool)
 	alertRepo := repository.NewAlertRepo(pool)
 	commandRepo := repository.NewCommandRepo(pool)
+	credentialRepo := repository.NewCredentialRepo(pool)
 
 	// Wire up services.
-	agentSvc := service.NewAgentService(hostRepo)
+	agentSvc := service.NewAgentService(hostRepo, credentialRepo, cfg.Server.EnrollmentToken)
 	commandSvc := service.NewCommandService(commandRepo, jobRepo)
 	discoverySvc := service.NewDiscoveryService(jobRepo)
 	executionSvc := service.NewExecutionService(execRepo, jobRepo)
@@ -93,11 +94,18 @@ func run() error {
 	evaluator := alerting.NewEvaluator(hostRepo, execRepo, alertRepo, jobRepo)
 
 	// Build HTTP handler.
+	authManager := api.NewAuthManager(
+		cfg.Server.Token,
+		cfg.Server.LoginUsername,
+		cfg.Server.LoginPassword,
+		agentSvc,
+	)
 	handler := api.NewHandler(
+		authManager,
 		agentSvc, commandSvc, discoverySvc, executionSvc, metricSvc,
 		hostRepo, jobRepo, alertRepo, execRepo,
 	)
-	router := api.NewRouter(handler, cfg.Server.Token)
+	router := api.NewRouter(handler)
 
 	// Start background alert evaluation loop.
 	stopEval := startAlertEvaluator(evaluator)

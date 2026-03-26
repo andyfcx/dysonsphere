@@ -26,17 +26,16 @@ chmod +x /usr/local/bin/observer-agent
 
 ```bash
 observer-agent init \
-  --server http://your-server:8000 \
-  --token your-secret-token \
-  --env production \
-  --tags crawler,weibo,tw
+  --server http://your-server:8000
 ```
 
 This will:
 1. Read `/etc/machine-id` (or generate a UUID) as `machine_id`
-2. Register this host with the central server
-3. Write config to `/etc/observer-agent/config.yaml`
-4. Write local state DB to `/var/lib/observer-agent/state.db`
+2. Prompt for the enrollment token with hidden input
+3. Enroll this host with the central server
+4. Write config to `/etc/observer-agent/config.yaml`
+5. Write the issued formal credential to a local secrets file
+6. Write local state DB to `/var/lib/observer-agent/state.db`
 
 ### Run
 
@@ -45,7 +44,8 @@ observer-agent run --config /etc/observer-agent/config.yaml
 ```
 
 If the config file is missing, `observer-agent run` will enter interactive setup,
-register the host, and write the config/state paths you provide.
+prompt for the server URL plus a hidden enrollment token, then write the config,
+credential file, and state file.
 
 ### Background mode
 

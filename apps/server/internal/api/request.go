@@ -33,9 +33,36 @@ func (r *RegisterRequest) toDomain() *domain.Host {
 	}
 }
 
+// EnrollRequest is the payload sent by an agent during bootstrap enrollment.
+type EnrollRequest struct {
+	EnrollmentToken string          `json:"enrollment_token"`
+	MachineID       string          `json:"machine_id"`
+	Hostname        string          `json:"hostname"`
+	IPAddress       string          `json:"ip_address"`
+	AgentVersion    string          `json:"agent_version"`
+	Metadata        json.RawMessage `json:"metadata,omitempty"`
+}
+
+func (r *EnrollRequest) toDomain() *domain.Host {
+	return &domain.Host{
+		MachineID:    r.MachineID,
+		Hostname:     r.Hostname,
+		IPAddress:    r.IPAddress,
+		Environment:  "production",
+		Tags:         []string{},
+		AgentVersion: r.AgentVersion,
+		Metadata:     r.Metadata,
+	}
+}
+
 // HeartbeatRequest is a lightweight ping from an agent.
 type HeartbeatRequest struct {
 	IPAddress string `json:"ip_address"`
+}
+
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 // ── Job discovery ──────────────────────────────────────────────────────────

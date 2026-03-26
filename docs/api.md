@@ -2,10 +2,15 @@
 
 Base URL: `http://localhost:8000`
 
-All `/api/v1/*` endpoints require the header:
+All protected `/api/v1/*` endpoints require the header:
 ```
 Authorization: Bearer <token>
 ```
+
+There are two token types:
+- Enrollment token: configured with `SERVER_ENROLLMENT_TOKEN`
+- Agent token: issued by `POST /api/v1/agents/enroll`
+- Dashboard session token: returned by `POST /api/v1/auth/login`
 
 Agent endpoints that act on behalf of a specific host also require:
 ```
@@ -14,7 +19,44 @@ X-Host-ID: <host-uuid>
 
 ---
 
+## Dashboard Auth
+
+### POST /api/v1/auth/login
+
+Login with the dashboard username/password configured on the server.
+
+**Request:**
+```json
+{
+  "username": "admin",
+  "password": "change-me"
+}
+```
+
+**Response 200:**
+```json
+{
+  "token": "session-token",
+  "username": "admin"
+}
+```
+
+### POST /api/v1/auth/logout
+
+Invalidates the current dashboard session token.
+
+**Response 200:**
+```json
+{ "ok": true }
+```
+
+---
+
 ## Agent Endpoints
+
+### POST /api/v1/agents/enroll
+
+Bootstrap a new agent using the one-time enrollment token.
 
 ### POST /api/v1/agents/register
 

@@ -42,6 +42,24 @@ This starts:
 - `server` — Go API server on http://localhost:8000
 - `web` — React dashboard on http://localhost:5173
 
+Dashboard login defaults to `admin` / `admin`. Set `SERVER_LOGIN_USERNAME` and
+`SERVER_LOGIN_PASSWORD` in `.env` before production use.
+
+### 2b. Start server host only
+
+If you want the central host to run PostgreSQL, server, and dashboard web, but not seed, use:
+
+```bash
+docker compose -f docker-compose.server.yml up --build -d
+```
+
+This starts:
+- `postgres`
+- `server`
+- `web`
+
+It does not start `seed`.
+
 ### 3. Load sample data (optional)
 
 ```bash
@@ -91,10 +109,7 @@ npm run dev
 make agent-init
 # or:
 cd apps/agent && go run ./cmd/agent init \
-  --server http://localhost:8000 \
-  --token dev-token \
-  --env dev \
-  --tags local,test
+  --server http://localhost:8000
 
 # Then run
 cd apps/agent && go run ./cmd/agent run \
@@ -102,7 +117,9 @@ cd apps/agent && go run ./cmd/agent run \
 ```
 
 If `/etc/observer-agent/config.yaml` does not exist yet, `observer-agent run`
-will now start an interactive setup flow and create it for you.
+will now start an interactive setup flow. It asks for the server URL and a
+hidden enrollment token, exchanges that for a formal agent credential, then
+writes the config and local credential file.
 
 Background mode and local status:
 
@@ -119,6 +136,14 @@ curl -X POST http://localhost:8000/api/v1/hosts/<host-id>/commands/run \
   -H "Authorization: Bearer dev-token" \
   -H "Content-Type: application/json" \
   -d '{"job_ids":["<job-id-1>","<job-id-2>"]}'
+```
+
+Login to the dashboard API:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"change-me"}'
 ```
 
 ## Database Migrations
@@ -212,10 +237,7 @@ scp bin/observer-agent user@host:/usr/local/bin/
 # Initialize
 ssh user@host
 observer-agent init \
-  --server http://your-server:8000 \
-  --token your-token \
-  --env production \
-  --tags web,nginx,prod
+  --server http://your-server:8000
 
 # Install as systemd service
 sudo cp infra/systemd/observer-agent.service /etc/systemd/system/
@@ -252,7 +274,7 @@ sudo systemctl enable --now observer-agent
 
 3. **Journald observation is MVP** — The journal observer calls `journalctl` as a subprocess. A production implementation would use the native C journal API or a Go binding.
 
-4. **Auth is token-based** — The MVP uses a single static bearer token. Production should use per-agent JWT tokens or API keys.
+4. **Auth is minimal** — Agents still use a static bearer token, and dashboard users use a single username/password with in-memory sessions. Production should use proper user management and durable sessions.
 
 5. **No TLS** — The MVP runs over plain HTTP. Add a reverse proxy (Caddy, nginx) with TLS for production.
 

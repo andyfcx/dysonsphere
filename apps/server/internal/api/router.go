@@ -9,7 +9,7 @@ import (
 )
 
 // NewRouter builds the chi router with all routes wired up.
-func NewRouter(h *Handler, token string) http.Handler {
+func NewRouter(h *Handler) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -30,9 +30,19 @@ func NewRouter(h *Handler, token string) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	// All /api/v1 routes require a static bearer token (MVP auth).
+	r.Route("/api/v1/auth", func(r chi.Router) {
+		r.Post("/login", h.Login)
+	})
+
+	r.Route("/api/v1/agents", func(r chi.Router) {
+		r.Post("/enroll", h.EnrollAgent)
+	})
+
+	// All /api/v1 routes require either the agent bearer token or a dashboard login session.
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(bearerAuth(token))
+		r.Use(h.auth.APIAuthMiddleware)
+
+		r.Post("/auth/logout", h.Logout)
 
 		// Agent endpoints
 		r.Post("/agents/register", h.RegisterAgent)
@@ -61,20 +71,4 @@ func NewRouter(h *Handler, token string) http.Handler {
 	})
 
 	return r
-}
-
-// bearerAuth is a simple token-based middleware for MVP auth.
-// TODO: replace with proper JWT or API key management for production.
-func bearerAuth(token string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			auth := r.Header.Get("Authorization")
-			expected := "Bearer " + token
-			if auth != expected {
-				writeError(w, http.StatusUnauthorized, "invalid or missing token")
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
 }

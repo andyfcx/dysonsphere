@@ -20,6 +20,36 @@ type Client struct {
 	httpClient *http.Client
 }
 
+// EnrollRequest is sent by the agent during one-time enrollment.
+type EnrollRequest struct {
+	EnrollmentToken string `json:"enrollment_token"`
+	MachineID       string `json:"machine_id"`
+	Hostname        string `json:"hostname"`
+	IPAddress       string `json:"ip_address"`
+	AgentVersion    string `json:"agent_version"`
+}
+
+// EnrollResponse returns the issued credential and initial config.
+type EnrollResponse struct {
+	HostID     string             `json:"host_id"`
+	Credential AgentCredential    `json:"credential"`
+	Config     AgentBootstrapConfig `json:"config"`
+}
+
+type AgentCredential struct {
+	Token string `json:"token"`
+}
+
+type AgentBootstrapConfig struct {
+	Environment         string   `json:"environment"`
+	Tags                []string `json:"tags"`
+	HeartbeatInterval   string   `json:"heartbeat_interval"`
+	DiscoveryInterval   string   `json:"discovery_interval"`
+	ProcessScanInterval string   `json:"process_scan_interval"`
+	ReportInterval      string   `json:"report_interval"`
+	CommandPollInterval string   `json:"command_poll_interval"`
+}
+
 // RunCommand is a server-dispatched job execution request for this host.
 type RunCommand struct {
 	ID          string    `json:"id"`
@@ -43,9 +73,17 @@ func NewClient(baseURL, token, hostID string) *Client {
 	}
 }
 
-// Register sends a host registration request.
-func (c *Client) Register(ctx context.Context, payload any) (map[string]any, error) {
-	return c.post(ctx, "/api/v1/agents/register", "", payload)
+// Enroll exchanges an enrollment token for a formal agent credential.
+func (c *Client) Enroll(ctx context.Context, reqBody *EnrollRequest) (*EnrollResponse, error) {
+	respBody, err := c.postRaw(ctx, "/api/v1/agents/enroll", "", reqBody)
+	if err != nil {
+		return nil, err
+	}
+	var resp EnrollResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("decode enroll response: %w", err)
+	}
+	return &resp, nil
 }
 
 // Heartbeat sends a heartbeat.
@@ -100,6 +138,18 @@ func (c *Client) CompleteRunCommand(ctx context.Context, id, status, message str
 
 // post is the generic POST helper.
 func (c *Client) post(ctx context.Context, path, hostID string, body any) (map[string]any, error) {
+	respBody, err := c.postRaw(ctx, path, hostID, body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result map[string]any
+	_ = json.Unmarshal(respBody, &result)
+	slog.Debug("api call ok", "path", path)
+	return result, nil
+}
+
+func (c *Client) postRaw(ctx context.Context, path, hostID string, body any) ([]byte, error) {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -110,7 +160,9 @@ func (c *Client) post(ctx context.Context, path, hostID string, body any) (map[s
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	if hostID != "" {
 		req.Header.Set("X-Host-ID", hostID)
 	}
@@ -125,11 +177,7 @@ func (c *Client) post(ctx context.Context, path, hostID string, body any) (map[s
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("server error %d: %s", resp.StatusCode, string(respBody))
 	}
-
-	var result map[string]any
-	_ = json.Unmarshal(respBody, &result)
-	slog.Debug("api call ok", "path", path, "status", resp.StatusCode)
-	return result, nil
+	return respBody, nil
 }
 
 func (c *Client) get(ctx context.Context, path, hostID string, out any) error {
@@ -137,7 +185,9 @@ func (c *Client) get(ctx context.Context, path, hostID string, out any) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	if hostID != "" {
 		req.Header.Set("X-Host-ID", hostID)
 	}

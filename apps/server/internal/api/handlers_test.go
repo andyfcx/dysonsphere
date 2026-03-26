@@ -31,6 +31,55 @@ func TestRouterAuthRequired(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
+func TestEnrollRoutePublicValidation(t *testing.T) {
+	router := newTestRouter(t)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/enroll", bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestLoginSuccess(t *testing.T) {
+	router := newTestRouter(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login",
+		bytes.NewReader([]byte(`{"username":"admin","password":"secret"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp api.LoginResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "admin", resp.Username)
+	assert.NotEmpty(t, resp.Token)
+}
+
+func TestLoginSessionCanAccessAPI(t *testing.T) {
+	router := newTestRouter(t)
+
+	loginRec := httptest.NewRecorder()
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login",
+		bytes.NewReader([]byte(`{"username":"admin","password":"secret"}`)))
+	loginReq.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(loginRec, loginReq)
+	require.Equal(t, http.StatusOK, loginRec.Code)
+
+	var loginResp api.LoginResponse
+	require.NoError(t, json.NewDecoder(loginRec.Body).Decode(&loginResp))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/heartbeat",
+		bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("Authorization", "Bearer "+loginResp.Token)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
 // TestRegisterAgentValidation verifies that missing fields return 400.
 func TestRegisterAgentValidation(t *testing.T) {
 	router := newTestRouter(t)
@@ -73,6 +122,7 @@ func newTestRouter(t *testing.T) http.Handler {
 	t.Helper()
 	// Passing nil services — only tests that don't reach service layer pass.
 	// TODO: replace with mocks for service-level tests.
-	h := api.NewHandler(nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	return api.NewRouter(h, "test-token")
+	auth := api.NewAuthManager("test-token", "admin", "secret", nil)
+	h := api.NewHandler(auth, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	return api.NewRouter(h)
 }
