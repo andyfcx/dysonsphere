@@ -25,11 +25,10 @@ type EnrollmentResult struct {
 
 // AgentService handles agent registration, enrollment, and heartbeat logic.
 type AgentService struct {
-	hosts            *repository.HostRepo
-	credentials      *repository.CredentialRepo
-	enrollmentToken  string
-	mu               sync.Mutex
-	enrollmentUsed   bool
+	hosts           *repository.HostRepo
+	credentials     *repository.CredentialRepo
+	enrollmentToken string
+	mu              sync.Mutex
 }
 
 func NewAgentService(hosts *repository.HostRepo, credentials *repository.CredentialRepo, enrollmentToken string) *AgentService {
@@ -107,10 +106,6 @@ func (s *AgentService) consumeEnrollmentToken(token string) error {
 	if token != s.enrollmentToken {
 		return fmt.Errorf("invalid enrollment token")
 	}
-	if s.enrollmentUsed {
-		return fmt.Errorf("enrollment token has already been used")
-	}
-	s.enrollmentUsed = true
 	return nil
 }
 

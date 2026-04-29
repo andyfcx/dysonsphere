@@ -30,13 +30,9 @@ func NewRouter(h *Handler) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	r.Route("/api/v1/auth", func(r chi.Router) {
-		r.Post("/login", h.Login)
-	})
-
-	r.Route("/api/v1/agents", func(r chi.Router) {
-		r.Post("/enroll", h.EnrollAgent)
-	})
+	// Unauthenticated endpoints.
+	r.Post("/api/v1/auth/login", h.Login)
+	r.Post("/api/v1/agents/enroll", h.EnrollAgent)
 
 	// All /api/v1 routes require either the agent bearer token or a dashboard login session.
 	r.Route("/api/v1", func(r chi.Router) {

@@ -58,17 +58,18 @@ func main() {
 }
 
 func initCmd() *cobra.Command {
-	var serverURL, configOut, stateFile, tokenFile string
+	var serverURL, configOut, stateFile, tokenFile, enrollmentToken string
 
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Enroll this host with the central server and write agent config",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return interactiveInit(serverURL, configOut, stateFile, tokenFile)
+			return interactiveInit(serverURL, enrollmentToken, configOut, stateFile, tokenFile)
 		},
 	}
 
 	cmd.Flags().StringVar(&serverURL, "server", "", "Observer server URL")
+	cmd.Flags().StringVar(&enrollmentToken, "enrollment-token", "", "Enrollment token (skips interactive prompt)")
 	cmd.Flags().StringVar(&configOut, "config-out", defaultConfigPath, "Path to write config file")
 	cmd.Flags().StringVar(&stateFile, "state-file", "/var/lib/observer-agent/state.db", "Path for local state db")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "", "Path to write formal agent credential")
@@ -194,15 +195,10 @@ func ensureConfig(configPath string) error {
 	}
 
 	fmt.Printf("Config %s not found. Starting interactive setup.\n", configPath)
-	return interactiveInit("", configPath, "/var/lib/observer-agent/state.db", defaultTokenFile(configPath))
+	return interactiveInit("", "", configPath, "/var/lib/observer-agent/state.db", defaultTokenFile(configPath))
 }
 
-func interactiveInit(serverURL, configOut, stateFile, tokenFile string) error {
-	reader := bufio.NewReader(os.Stdin)
-	serverURL = prompt(reader, "Server URL", serverURL)
-	if serverURL == "" {
-		return fmt.Errorf("server URL is required")
-	}
+func interactiveInit(serverURL, enrollmentToken, configOut, stateFile, tokenFile string) error {
 	if configOut == "" {
 		configOut = defaultConfigPath
 	}
@@ -213,12 +209,23 @@ func interactiveInit(serverURL, configOut, stateFile, tokenFile string) error {
 		tokenFile = defaultTokenFile(configOut)
 	}
 
-	enrollmentToken, err := promptSecret("Enrollment token")
-	if err != nil {
-		return fmt.Errorf("read enrollment token: %w", err)
-	}
-	if enrollmentToken == "" {
-		return fmt.Errorf("enrollment token is required")
+	// Non-interactive mode: all required values provided as flags.
+	if serverURL == "" || enrollmentToken == "" {
+		reader := bufio.NewReader(os.Stdin)
+		serverURL = prompt(reader, "Server URL", serverURL)
+		if serverURL == "" {
+			return fmt.Errorf("server URL is required")
+		}
+		if enrollmentToken == "" {
+			var err error
+			enrollmentToken, err = promptSecret("Enrollment token")
+			if err != nil {
+				return fmt.Errorf("read enrollment token: %w", err)
+			}
+			if enrollmentToken == "" {
+				return fmt.Errorf("enrollment token is required")
+			}
+		}
 	}
 
 	hostname, _ := os.Hostname()

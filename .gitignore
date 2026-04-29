@@ -2,3 +2,4 @@ prompt.md
 .env
 apps/web/node_modules/
 apps/web/dist/
+.env.redis0
