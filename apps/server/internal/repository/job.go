@@ -173,7 +173,7 @@ func scanJob(row pgx.Row) (*domain.Job, error) {
 }
 
 func collectJobs(rows pgx.Rows) ([]*domain.Job, error) {
-	var jobs []*domain.Job
+	jobs := make([]*domain.Job, 0)
 	for rows.Next() {
 		var j domain.Job
 		var id, hostID uuid.UUID

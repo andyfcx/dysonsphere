@@ -12,6 +12,8 @@ export default function Metrics() {
   if (isLoading) return <div className="loading">Loading metrics...</div>
   if (error) return <div className="error-msg">{String(error)}</div>
 
+  const safeMetrics = metrics ?? []
+
   return (
     <div>
       <div className="page-title">
@@ -19,7 +21,7 @@ export default function Metrics() {
         <div className="page-subtitle">Probe results from all agents</div>
       </div>
 
-      {metrics.length === 0 ? (
+      {safeMetrics.length === 0 ? (
         <div className="empty">No metric data yet. Configure probes in agent config.</div>
       ) : (
         <div className="table-wrap">
@@ -35,7 +37,7 @@ export default function Metrics() {
               </tr>
             </thead>
             <tbody>
-              {metrics.map((m: DataMetric) => (
+              {safeMetrics.map((m: DataMetric) => (
                 <tr key={m.id}>
                   <td style={{ fontWeight: 600 }}>{m.metric_name}</td>
                   <td>

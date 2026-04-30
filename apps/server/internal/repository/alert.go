@@ -131,7 +131,7 @@ func scanAlert(row pgx.Row) (*domain.Alert, error) {
 }
 
 func collectAlerts(rows pgx.Rows) ([]*domain.Alert, error) {
-	var alerts []*domain.Alert
+	alerts := make([]*domain.Alert, 0)
 	for rows.Next() {
 		var a domain.Alert
 		var id, targetID uuid.UUID

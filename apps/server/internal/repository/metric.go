@@ -93,7 +93,7 @@ func scanMetric(row pgx.Row) (*domain.DataMetric, error) {
 }
 
 func collectMetrics(rows pgx.Rows) ([]*domain.DataMetric, error) {
-	var metrics []*domain.DataMetric
+	metrics := make([]*domain.DataMetric, 0)
 	for rows.Next() {
 		var m domain.DataMetric
 		var id, hostID uuid.UUID

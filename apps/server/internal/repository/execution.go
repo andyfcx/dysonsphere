@@ -151,7 +151,7 @@ func scanExecution(row pgx.Row) (*domain.Execution, error) {
 }
 
 func collectExecutions(rows pgx.Rows) ([]*domain.Execution, error) {
-	var execs []*domain.Execution
+	execs := make([]*domain.Execution, 0)
 	for rows.Next() {
 		var e domain.Execution
 		var id, hostID uuid.UUID

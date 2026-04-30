@@ -12,8 +12,9 @@ export default function Alerts() {
   if (isLoading) return <div className="loading">Loading alerts...</div>
   if (error) return <div className="error-msg">{String(error)}</div>
 
-  const active = alerts.filter((a: Alert) => a.status === 'active')
-  const resolved = alerts.filter((a: Alert) => a.status === 'resolved')
+  const safeAlerts = alerts ?? []
+  const active = safeAlerts.filter((a: Alert) => a.status === 'active')
+  const resolved = safeAlerts.filter((a: Alert) => a.status === 'resolved')
 
   return (
     <div>
@@ -46,7 +47,7 @@ export default function Alerts() {
         </div>
       )}
 
-      {alerts.length === 0 && (
+      {safeAlerts.length === 0 && (
         <div className="empty" style={{ color: 'var(--green)' }}>
           ✓ No alerts. All systems operational.
         </div>

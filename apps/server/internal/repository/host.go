@@ -155,7 +155,7 @@ func scanHost(row pgx.Row) (*domain.Host, error) {
 }
 
 func collectHosts(rows pgx.Rows) ([]*domain.Host, error) {
-	var hosts []*domain.Host
+	hosts := make([]*domain.Host, 0)
 	for rows.Next() {
 		var h domain.Host
 		var id uuid.UUID
