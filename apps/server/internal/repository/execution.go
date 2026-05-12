@@ -53,14 +53,14 @@ func (r *ExecutionRepo) Insert(ctx context.Context, e *domain.Execution) (*domai
 	row := r.db.QueryRow(ctx, `
 		INSERT INTO executions
 		    (host_id, job_id, scheduled_at, detected_started_at, detected_finished_at,
-		     duration_seconds, status, confidence_score, detection_sources, evidence)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		     duration_seconds, status, confidence_score, detection_sources, output_text, evidence)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		RETURNING id, host_id, job_id, scheduled_at, detected_started_at,
 		          detected_finished_at, duration_seconds, status, confidence_score,
-		          detection_sources, evidence, created_at
+		          detection_sources, output_text, evidence, created_at
 	`, hostID, jobID, e.ScheduledAt, e.DetectedStartedAt, e.DetectedFinishedAt,
 		e.DurationSeconds, string(e.Status), e.ConfidenceScore,
-		e.DetectionSources, evidenceRaw)
+		e.DetectionSources, e.OutputText, evidenceRaw)
 
 	return scanExecution(row)
 }
@@ -73,7 +73,7 @@ func (r *ExecutionRepo) List(ctx context.Context, limit, offset int) ([]*domain.
 	rows, err := r.db.Query(ctx, `
 		SELECT id, host_id, job_id, scheduled_at, detected_started_at,
 		       detected_finished_at, duration_seconds, status, confidence_score,
-		       detection_sources, evidence, created_at
+		       detection_sources, output_text, evidence, created_at
 		FROM executions ORDER BY created_at DESC LIMIT $1 OFFSET $2
 	`, limit, offset)
 	if err != nil {
@@ -95,7 +95,7 @@ func (r *ExecutionRepo) ListByJob(ctx context.Context, jobID string, limit int) 
 	rows, err := r.db.Query(ctx, `
 		SELECT id, host_id, job_id, scheduled_at, detected_started_at,
 		       detected_finished_at, duration_seconds, status, confidence_score,
-		       detection_sources, evidence, created_at
+		       detection_sources, output_text, evidence, created_at
 		FROM executions WHERE job_id = $1 ORDER BY created_at DESC LIMIT $2
 	`, jid, limit)
 	if err != nil {
@@ -146,7 +146,7 @@ func (r *ExecutionRepo) ListFiltered(ctx context.Context, f ExecutionFilter, lim
 
 	q := `SELECT id, host_id, job_id, scheduled_at, detected_started_at,
 	             detected_finished_at, duration_seconds, status, confidence_score,
-	             detection_sources, evidence, created_at
+	             detection_sources, output_text, evidence, created_at
 	      FROM executions`
 	if len(conditions) > 0 {
 		q += " WHERE " + strings.Join(conditions, " AND ")
@@ -194,7 +194,7 @@ func scanExecution(row pgx.Row) (*domain.Execution, error) {
 	err := row.Scan(
 		&id, &hostID, &jobID, &scheduledAt, &startedAt,
 		&finishedAt, &durSec, &e.Status, &e.ConfidenceScore,
-		&sources, &evidence, &e.CreatedAt,
+		&sources, &e.OutputText, &evidence, &e.CreatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("scan execution: %w", err)
@@ -230,7 +230,7 @@ func collectExecutions(rows pgx.Rows) ([]*domain.Execution, error) {
 		if err := rows.Scan(
 			&id, &hostID, &jobID, &scheduledAt, &startedAt,
 			&finishedAt, &durSec, &e.Status, &e.ConfidenceScore,
-			&sources, &evidence, &e.CreatedAt,
+			&sources, &e.OutputText, &evidence, &e.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan execution row: %w", err)
 		}

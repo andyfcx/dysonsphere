@@ -88,6 +88,7 @@ type Execution struct {
 	Status              ExecutionStatus `json:"status"`
 	ConfidenceScore     float64         `json:"confidence_score"` // 0.0–1.0
 	DetectionSources    []string        `json:"detection_sources"`
+	OutputText          *string         `json:"output_text,omitempty"` // captured stdout+stderr
 	Evidence            json.RawMessage `json:"evidence,omitempty"`
 	CreatedAt           time.Time       `json:"created_at"`
 }
@@ -217,12 +218,14 @@ type AgentCommand struct {
 // ── Stats types ───────────────────────────────────────────────────────────────
 
 // WindowStats aggregates execution outcomes for a time window.
+// Only completed executions (status != 'running') are counted.
 type WindowStats struct {
 	Window      string  `json:"window"`       // "24h", "7d", "30d"
 	Since       string  `json:"since"`        // RFC3339
 	Total       int64   `json:"total"`
 	Success     int64   `json:"success"`
 	Failed      int64   `json:"failed"`
+	Partial     int64   `json:"partial"`      // completed but exit code unknown (external observation)
 	Unknown     int64   `json:"unknown"`
 	Missed      int64   `json:"missed"`
 	SuccessRate float64 `json:"success_rate"` // 0–100

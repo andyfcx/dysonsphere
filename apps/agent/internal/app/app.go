@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,6 +32,7 @@ type Agent struct {
 	scanner  *discovery.CronScanner
 	procObs  *observer.ProcessObserver
 	jrnlObs  *observer.JournalObserver
+	mailObs  *observer.MailSpoolReader
 	probeRun *probes.Runner
 
 	knownJobs  map[string]*discovery.DiscoveredJob
@@ -80,6 +82,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		scanner:    &discovery.CronScanner{},
 		procObs:    &observer.ProcessObserver{},
 		jrnlObs:    &observer.JournalObserver{},
+		mailObs:    &observer.MailSpoolReader{},
 		probeRun:   probes.NewRunner(cfg.Probes),
 		knownJobs:  make(map[string]*discovery.DiscoveredJob),
 		activeJobs: make(map[int32]*activeExecution),
@@ -94,21 +97,25 @@ func (a *Agent) mainLoop(ctx context.Context) error {
 	processScanD := parseDuration(a.cfg.Agent.ProcessScanInterval, 30*time.Second)
 	reportD := parseDuration(a.cfg.Agent.ReportInterval, time.Minute)
 	commandPollD := parseDuration(a.cfg.Agent.CommandPollInterval, 15*time.Second)
+	mailScanD := parseDuration(a.cfg.Agent.MailScanInterval, 2*time.Minute)
 
 	heartbeatTick := time.NewTicker(heartbeatD)
 	discoveryTick := time.NewTicker(discoveryD)
 	processTick := time.NewTicker(processScanD)
 	reportTick := time.NewTicker(reportD)
 	commandTick := time.NewTicker(commandPollD)
+	mailTick := time.NewTicker(mailScanD)
 	defer heartbeatTick.Stop()
 	defer discoveryTick.Stop()
 	defer processTick.Stop()
 	defer reportTick.Stop()
 	defer commandTick.Stop()
+	defer mailTick.Stop()
 
 	a.sendHeartbeat(ctx)
 	a.runDiscovery(ctx)
 	a.pollCommands(ctx)
+	a.runMailScan(ctx)
 
 	for {
 		select {
@@ -126,6 +133,8 @@ func (a *Agent) mainLoop(ctx context.Context) error {
 			a.runProbes(ctx)
 		case <-commandTick.C:
 			a.pollCommands(ctx)
+		case <-mailTick.C:
+			a.runMailScan(ctx)
 		}
 	}
 }
@@ -243,6 +252,18 @@ func (a *Agent) runProcessScan(ctx context.Context) {
 			DurationSeconds: &duration,
 			Evidence:        mustJSON(map[string]any{"note": "process disappeared; completion inferred"}),
 		})
+		// Send completion event to server (new record with finished status).
+		completionID := uuid.New().String()
+		a.reporter.BufferExecution(completionID, map[string]any{
+			"command_hash":         active.JobHash,
+			"detected_started_at":  active.StartedAt.UTC().Format(time.RFC3339),
+			"detected_finished_at": finishedAt.UTC().Format(time.RFC3339),
+			"duration_seconds":     duration,
+			"status":               "partial",
+			"confidence_score":     active.Confidence,
+			"detection_sources":    []string{"process"},
+			"evidence":             map[string]any{"note": "process disappeared; completion inferred"},
+		})
 		delete(a.activeJobs, pid)
 	}
 
@@ -322,12 +343,10 @@ func (a *Agent) executeRunCommand(ctx context.Context, cmd *client.RunCommand) {
 		FinishedAt:      &finishedAt,
 		DurationSeconds: &duration,
 		ExitCode:        exitCode,
-		Evidence: mustJSON(map[string]any{
-			"command_id":    cmd.ID,
-			"stdout_stderr": truncateString(string(output), 2000),
-		}),
+		Evidence:        mustJSON(map[string]any{"command_id": cmd.ID}),
 	})
 
+	outputText := truncateString(string(output), 4000)
 	a.reporter.BufferExecution(uuid.New().String(), map[string]any{
 		"job_id":               cmd.JobID,
 		"command_hash":         cmd.CommandHash,
@@ -337,10 +356,10 @@ func (a *Agent) executeRunCommand(ctx context.Context, cmd *client.RunCommand) {
 		"status":               status,
 		"confidence_score":     1.0,
 		"detection_sources":    []string{"remote_command"},
+		"output_text":          outputText,
 		"evidence": map[string]any{
-			"command_id":    cmd.ID,
-			"exit_code":     exitCodeValue(exitCode),
-			"stdout_stderr": truncateString(string(output), 2000),
+			"command_id": cmd.ID,
+			"exit_code":  exitCodeValue(exitCode),
 		},
 	})
 	a.reporter.FlushExecutions(ctx)
@@ -354,6 +373,71 @@ func (a *Agent) saveLocalExecution(exec *state.LocalExecution) {
 	if err := a.store.SaveLocalExecution(exec); err != nil {
 		slog.Warn("save local execution failed", "id", exec.ID, "err", err)
 	}
+}
+
+func (a *Agent) runMailScan(_ context.Context) {
+	paths := a.cfg.Agent.MailSpoolPaths
+	if len(paths) == 0 {
+		paths = []string{"/var/mail/root", "/var/spool/mail/root"}
+	}
+
+	for _, path := range paths {
+		offsetKey := "mailspool_offset:" + path
+		offsetStr, _ := a.store.GetMeta(offsetKey)
+		var offset int64
+		fmt.Sscanf(offsetStr, "%d", &offset)
+
+		messages, newOffset, err := a.mailObs.ReadNew(path, offset)
+		if err != nil {
+			slog.Debug("mail spool read error", "path", path, "err", err)
+			continue
+		}
+		if newOffset != offset {
+			_ = a.store.SetMeta(offsetKey, fmt.Sprintf("%d", newOffset))
+		}
+		for _, msg := range messages {
+			a.processMailMessage(msg)
+		}
+		if len(messages) > 0 {
+			slog.Info("mail spool messages collected", "path", path, "count", len(messages))
+		}
+	}
+}
+
+func (a *Agent) processMailMessage(msg *observer.CronMailMessage) {
+	// Try to correlate the mail to a known job by matching the command string.
+	var commandHash string
+	for hash, job := range a.knownJobs {
+		if strings.Contains(msg.Command, job.NormalizedCommand) ||
+			strings.Contains(job.NormalizedCommand, msg.Command) ||
+			strings.EqualFold(strings.TrimSpace(msg.Command), strings.TrimSpace(job.RawCommand)) {
+			commandHash = hash
+			break
+		}
+	}
+
+	detectedAt := msg.EnvelopeDate
+	outputText := truncateString(msg.Body, 4000)
+
+	event := map[string]any{
+		"detected_started_at": detectedAt.UTC().Format(time.RFC3339),
+		// Mail is sent after cron job completion; status is partial because
+		// we don't have the exit code from the mail envelope.
+		"status":           "partial",
+		"confidence_score": 0.7,
+		"detection_sources": []string{"mail_spool"},
+		"output_text":      outputText,
+		"evidence": map[string]any{
+			"source":    "mail_spool",
+			"subject":   msg.Subject,
+			"mail_user": msg.MailUser,
+		},
+	}
+	if commandHash != "" {
+		event["command_hash"] = commandHash
+	}
+
+	a.reporter.BufferExecution(uuid.New().String(), event)
 }
 
 func (a *Agent) knownJobsForMatch() map[string]string {

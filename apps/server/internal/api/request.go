@@ -118,6 +118,7 @@ type ExecutionEvent struct {
 	Status              string          `json:"status"`
 	ConfidenceScore     float64         `json:"confidence_score"`
 	DetectionSources    []string        `json:"detection_sources"`
+	OutputText          *string         `json:"output_text,omitempty"`
 	Evidence            json.RawMessage `json:"evidence,omitempty"`
 }
 
@@ -138,6 +139,7 @@ func (r *ExecutionBatchRequest) toDomain() []*domain.Execution {
 			Status:             domain.ExecutionStatus(e.Status),
 			ConfidenceScore:    e.ConfidenceScore,
 			DetectionSources:   e.DetectionSources,
+			OutputText:         e.OutputText,
 			Evidence:           e.Evidence,
 		}
 		if e.CommandHash != "" {

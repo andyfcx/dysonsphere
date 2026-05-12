@@ -36,6 +36,11 @@ type AgentConfig struct {
 	ProcessScanInterval string `yaml:"process_scan_interval"` // e.g. "30s"
 	ReportInterval      string `yaml:"report_interval"`       // e.g. "1m"
 	CommandPollInterval string `yaml:"command_poll_interval"` // e.g. "15s"
+	MailScanInterval    string `yaml:"mail_scan_interval"`    // e.g. "2m"
+
+	// MailSpoolPaths lists Unix mbox files to scan for cron stdout/stderr.
+	// Defaults to ["/var/mail/root", "/var/spool/mail/root"] when empty.
+	MailSpoolPaths []string `yaml:"mail_spool_paths"`
 }
 
 // ProbeConfig defines a single data probe.
