@@ -130,6 +130,7 @@ export interface Execution {
   status: string
   confidence_score: number
   detection_sources: string[]
+  output_text?: string
   evidence?: Record<string, unknown>
   created_at: string
 }

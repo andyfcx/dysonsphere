@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useParams, Link } from 'react-router-dom'
 import { api, Execution } from '../api/client'
@@ -11,6 +12,15 @@ export default function JobDetail() {
     queryFn: () => api.getJob(id!),
     enabled: !!id,
   })
+  const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set())
+
+  function toggleLog(execId: string) {
+    setExpandedLogs(prev => {
+      const next = new Set(prev)
+      next.has(execId) ? next.delete(execId) : next.add(execId)
+      return next
+    })
+  }
 
   if (isLoading) return <div className="loading">Loading...</div>
   if (error || !data) return <div className="error-msg">Job not found</div>
@@ -77,26 +87,72 @@ export default function JobDetail() {
                   <th>Duration</th>
                   <th>Sources</th>
                   <th>Created</th>
+                  <th>Log</th>
                 </tr>
               </thead>
               <tbody>
-                {executions.map((e: Execution) => (
-                  <tr key={e.id}>
-                    <td><StatusBadge status={e.status} /></td>
-                    <td>
-                      <span title="Confidence reflects inferred status, not exact measurement">
-                        {(e.confidence_score * 100).toFixed(0)}%
-                      </span>
-                    </td>
-                    <td><TimeAgo iso={e.detected_started_at} /></td>
-                    <td><TimeAgo iso={e.detected_finished_at} fallback="—" /></td>
-                    <td>{e.duration_seconds != null ? `${e.duration_seconds.toFixed(1)}s` : '—'}</td>
-                    <td style={{ color: 'var(--text2)' }}>
-                      {(e.detection_sources || []).join(', ') || '—'}
-                    </td>
-                    <td><TimeAgo iso={e.created_at} /></td>
-                  </tr>
-                ))}
+                {executions.map((e: Execution) => {
+                  const isOpen = expandedLogs.has(e.id)
+                  return (
+                    <>
+                      <tr key={e.id}>
+                        <td><StatusBadge status={e.status} /></td>
+                        <td>
+                          <span title="Confidence reflects inferred status, not exact measurement">
+                            {(e.confidence_score * 100).toFixed(0)}%
+                          </span>
+                        </td>
+                        <td><TimeAgo iso={e.detected_started_at} /></td>
+                        <td><TimeAgo iso={e.detected_finished_at} fallback="—" /></td>
+                        <td>{e.duration_seconds != null ? `${e.duration_seconds.toFixed(1)}s` : '—'}</td>
+                        <td style={{ color: 'var(--text2)' }}>
+                          {(e.detection_sources || []).join(', ') || '—'}
+                        </td>
+                        <td><TimeAgo iso={e.created_at} /></td>
+                        <td>
+                          {e.output_text ? (
+                            <button
+                              onClick={() => toggleLog(e.id)}
+                              style={{
+                                background: 'none',
+                                border: '1px solid var(--border)',
+                                borderRadius: 4,
+                                color: 'var(--text2)',
+                                cursor: 'pointer',
+                                fontSize: 11,
+                                padding: '2px 8px',
+                              }}
+                            >
+                              {isOpen ? '▲ hide' : '▼ log'}
+                            </button>
+                          ) : '—'}
+                        </td>
+                      </tr>
+                      {isOpen && e.output_text && (
+                        <tr key={`${e.id}-log`}>
+                          <td colSpan={8} style={{ padding: 0, borderBottom: '1px solid var(--border)' }}>
+                            <pre style={{
+                              margin: 0,
+                              padding: '12px 16px',
+                              background: 'var(--bg3)',
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              lineHeight: 1.6,
+                              whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-all',
+                              maxHeight: 400,
+                              overflowY: 'auto',
+                              color: 'var(--text)',
+                              borderTop: '1px solid var(--border)',
+                            }}>
+                              {e.output_text}
+                            </pre>
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  )
+                })}
               </tbody>
             </table>
           </div>
