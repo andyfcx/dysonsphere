@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -22,6 +23,8 @@ func parseWindow(r *http.Request) (since time.Time, label string, bucketSeconds 
 		return time.Now().Add(-7 * 24 * time.Hour), "7d", 6 * 3600
 	case "30d":
 		return time.Now().Add(-30 * 24 * time.Hour), "30d", 86400
+	case "90d":
+		return time.Now().Add(-90 * 24 * time.Hour), "90d", 86400
 	default:
 		return time.Now().Add(-24 * time.Hour), "24h", 3600
 	}
@@ -85,7 +88,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, ok := h.auth.Login(req.Username, req.Password)
+	resp, ok := h.auth.Login(clientIP(r), req.Username, req.Password)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "invalid username or password")
 		return
@@ -552,6 +555,16 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, ErrorResponse{Error: msg, Code: status})
+}
+
+// clientIP extracts just the IP address from r.RemoteAddr (strips port).
+// chi's RealIP middleware already rewrites RemoteAddr from X-Real-IP / X-Forwarded-For.
+func clientIP(r *http.Request) string {
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return ip
 }
 
 func parsePagination(r *http.Request) (limit, offset int) {

@@ -123,6 +123,6 @@ func newTestRouter(t *testing.T) http.Handler {
 	// Passing nil services — only tests that don't reach service layer pass.
 	// TODO: replace with mocks for service-level tests.
 	auth := api.NewAuthManager("test-token", "admin", "secret", nil)
-	h := api.NewHandler(auth, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := api.NewHandler(auth, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "")
 	return api.NewRouter(h)
 }
