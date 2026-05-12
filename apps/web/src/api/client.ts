@@ -172,6 +172,81 @@ export interface JobDetail {
   executions: Execution[]
 }
 
+// ── Analytics types ────────────────────────────────────────────────────────
+
+export interface WindowStats {
+  window: string
+  since: string
+  total: number
+  success: number
+  failed: number
+  unknown: number
+  missed: number
+  success_rate: number
+}
+
+export interface TrendPoint {
+  bucket: string
+  total: number
+  success: number
+  failed: number
+  unknown: number
+}
+
+export interface JobSuccessRate {
+  job_id: string
+  host_id: string
+  total: number
+  success: number
+  failed: number
+  success_rate: number
+  consecutive_fail: number
+  last_run_at?: string
+}
+
+export interface HostFailureCount {
+  host_id: string
+  total: number
+  failed: number
+  failure_rate: number
+}
+
+export interface RecoveryEpisode {
+  episode_start: string
+  episode_end: string
+  failure_count: number
+  recovered_at?: string
+  recovery_seconds?: number
+}
+
+export interface JobRecoverySummary {
+  job_id: string
+  host_id: string
+  is_currently_failing: boolean
+  current_episode_since?: string
+  current_episode_fails?: number
+  last_recovered_at?: string
+  avg_recovery_seconds?: number
+  episodes: RecoveryEpisode[]
+}
+
+export interface EnrollmentTokenCreated {
+  id: string
+  label: string
+  payload: string
+  expires_at: string
+  created_at: string
+}
+
+export interface EnrollmentTokenItem {
+  id: string
+  label: string
+  used: boolean
+  used_at?: string
+  expires_at: string
+  created_at: string
+}
+
 // ── API calls ──────────────────────────────────────────────────────────────
 
 export const api = {
@@ -179,7 +254,32 @@ export const api = {
   getHosts: () => request<Host[]>('/api/v1/hosts'),
   getJobs: () => request<Job[]>('/api/v1/jobs'),
   getJob: (id: string) => request<JobDetail>(`/api/v1/jobs/${id}`),
-  getExecutions: () => request<Execution[]>('/api/v1/executions'),
+  getExecutions: (params?: { status?: string; host_id?: string; job_id?: string; window?: string }) => {
+    const q = new URLSearchParams()
+    if (params?.status) q.set('status', params.status)
+    if (params?.host_id) q.set('host_id', params.host_id)
+    if (params?.job_id) q.set('job_id', params.job_id)
+    if (params?.window) q.set('window', params.window)
+    const qs = q.toString()
+    return request<Execution[]>(`/api/v1/executions${qs ? '?' + qs : ''}`)
+  },
+  // ── Analytics ──────────────────────────────────────────────────────────
+  getWindowStats: (window?: string) =>
+    request<WindowStats>(`/api/v1/stats/failures${window ? '?window=' + window : ''}`),
+  getFailureTrend: (window?: string) =>
+    request<{ trend: TrendPoint[] }>(`/api/v1/stats/trend${window ? '?window=' + window : ''}`),
+  getJobStats: (window?: string) =>
+    request<{ jobs: JobSuccessRate[] }>(`/api/v1/stats/jobs${window ? '?window=' + window : ''}`),
+  getHostStats: (window?: string) =>
+    request<{ hosts: HostFailureCount[] }>(`/api/v1/stats/hosts${window ? '?window=' + window : ''}`),
+  getRecoveryStats: () =>
+    request<{ jobs: JobRecoverySummary[] }>('/api/v1/stats/recovery'),
   getMetrics: () => request<DataMetric[]>('/api/v1/metrics'),
   getAlerts: () => request<Alert[]>('/api/v1/alerts'),
+  createEnrollmentToken: (label: string, serverUrl: string) =>
+    request<EnrollmentTokenCreated>('/api/v1/enrollment-tokens', {
+      method: 'POST',
+      body: JSON.stringify({ label, server_url: serverUrl }),
+    }),
+  listEnrollmentTokens: () => request<EnrollmentTokenItem[]>('/api/v1/enrollment-tokens'),
 }

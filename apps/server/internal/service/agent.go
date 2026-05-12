@@ -25,17 +25,24 @@ type EnrollmentResult struct {
 
 // AgentService handles agent registration, enrollment, and heartbeat logic.
 type AgentService struct {
-	hosts           *repository.HostRepo
-	credentials     *repository.CredentialRepo
-	enrollmentToken string
-	mu              sync.Mutex
+	hosts            *repository.HostRepo
+	credentials      *repository.CredentialRepo
+	enrollmentTokens *repository.EnrollmentTokenRepo
+	staticToken      string // legacy static enrollment token
+	mu               sync.Mutex
 }
 
-func NewAgentService(hosts *repository.HostRepo, credentials *repository.CredentialRepo, enrollmentToken string) *AgentService {
+func NewAgentService(
+	hosts *repository.HostRepo,
+	credentials *repository.CredentialRepo,
+	enrollmentTokens *repository.EnrollmentTokenRepo,
+	staticToken string,
+) *AgentService {
 	return &AgentService{
-		hosts:           hosts,
-		credentials:     credentials,
-		enrollmentToken: enrollmentToken,
+		hosts:            hosts,
+		credentials:      credentials,
+		enrollmentTokens: enrollmentTokens,
+		staticToken:      staticToken,
 	}
 }
 
@@ -55,7 +62,7 @@ func (s *AgentService) Register(ctx context.Context, h *domain.Host) (*domain.Ho
 
 // Enroll validates a one-time enrollment token, registers the host, and issues a formal credential.
 func (s *AgentService) Enroll(ctx context.Context, enrollmentToken string, h *domain.Host) (*EnrollmentResult, error) {
-	if err := s.consumeEnrollmentToken(enrollmentToken); err != nil {
+	if err := s.consumeEnrollmentToken(ctx, enrollmentToken); err != nil {
 		return nil, err
 	}
 
@@ -80,6 +87,26 @@ func (s *AgentService) Enroll(ctx context.Context, enrollmentToken string, h *do
 	}, nil
 }
 
+// GenerateEnrollmentToken creates a new DB-backed one-time enrollment token valid for 24 hours.
+// It returns the raw (unhashed) token and the stored record.
+func (s *AgentService) GenerateEnrollmentToken(ctx context.Context, label string) (string, *domain.EnrollmentToken, error) {
+	rawToken, err := newAgentToken()
+	if err != nil {
+		return "", nil, fmt.Errorf("generate enrollment token: %w", err)
+	}
+	expiresAt := time.Now().Add(24 * time.Hour)
+	record, err := s.enrollmentTokens.Create(ctx, hashToken(rawToken), label, expiresAt)
+	if err != nil {
+		return "", nil, err
+	}
+	return rawToken, record, nil
+}
+
+// ListEnrollmentTokens returns all enrollment tokens ordered by creation time.
+func (s *AgentService) ListEnrollmentTokens(ctx context.Context) ([]*domain.EnrollmentToken, error) {
+	return s.enrollmentTokens.List(ctx)
+}
+
 // Heartbeat updates the host's last_heartbeat_at and refreshes current state.
 func (s *AgentService) Heartbeat(ctx context.Context, hostID, ipAddress string) error {
 	if err := s.hosts.UpdateHeartbeat(ctx, hostID, ipAddress); err != nil {
@@ -97,13 +124,27 @@ func (s *AgentService) ValidateCredential(ctx context.Context, hostID, agentToke
 	return err == nil && ok
 }
 
-func (s *AgentService) consumeEnrollmentToken(token string) error {
+// consumeEnrollmentToken checks DB-backed tokens first, then falls back to the static token.
+func (s *AgentService) consumeEnrollmentToken(ctx context.Context, token string) error {
 	if token == "" {
 		return fmt.Errorf("enrollment token is required")
 	}
+
+	hash := hashToken(token)
+
+	// Try DB-backed token first.
+	found, err := s.enrollmentTokens.Found(ctx, hash)
+	if err != nil {
+		return fmt.Errorf("lookup enrollment token: %w", err)
+	}
+	if found {
+		return s.enrollmentTokens.Consume(ctx, hash)
+	}
+
+	// Fall back to static token (legacy / dev usage).
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if token != s.enrollmentToken {
+	if token != s.staticToken {
 		return fmt.Errorf("invalid enrollment token")
 	}
 	return nil

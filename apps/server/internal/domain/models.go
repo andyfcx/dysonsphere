@@ -187,6 +187,16 @@ const (
 	AgentCommandStatusFailed     AgentCommandStatus = "failed"
 )
 
+// EnrollmentToken is a single-use token that authorises a new agent to enroll.
+type EnrollmentToken struct {
+	ID        string     `json:"id"`
+	Label     string     `json:"label"`
+	Used      bool       `json:"used"`
+	UsedAt    *time.Time `json:"used_at,omitempty"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
 // AgentCommand represents a server-side request for an agent to execute a job immediately.
 type AgentCommand struct {
 	ID           string             `json:"id"`
@@ -202,4 +212,68 @@ type AgentCommand struct {
 	DispatchedAt *time.Time         `json:"dispatched_at,omitempty"`
 	StartedAt    *time.Time         `json:"started_at,omitempty"`
 	FinishedAt   *time.Time         `json:"finished_at,omitempty"`
+}
+
+// ── Stats types ───────────────────────────────────────────────────────────────
+
+// WindowStats aggregates execution outcomes for a time window.
+type WindowStats struct {
+	Window      string  `json:"window"`       // "24h", "7d", "30d"
+	Since       string  `json:"since"`        // RFC3339
+	Total       int64   `json:"total"`
+	Success     int64   `json:"success"`
+	Failed      int64   `json:"failed"`
+	Unknown     int64   `json:"unknown"`
+	Missed      int64   `json:"missed"`
+	SuccessRate float64 `json:"success_rate"` // 0–100
+}
+
+// TrendPoint is one time-bucket in a failure trend series.
+type TrendPoint struct {
+	Bucket  time.Time `json:"bucket"`
+	Total   int64     `json:"total"`
+	Success int64     `json:"success"`
+	Failed  int64     `json:"failed"`
+	Unknown int64     `json:"unknown"`
+}
+
+// JobSuccessRate is per-job aggregated stats for a window.
+type JobSuccessRate struct {
+	JobID           string     `json:"job_id"`
+	HostID          string     `json:"host_id"`
+	Total           int64      `json:"total"`
+	Success         int64      `json:"success"`
+	Failed          int64      `json:"failed"`
+	SuccessRate     float64    `json:"success_rate"` // 0–100
+	ConsecutiveFail int        `json:"consecutive_fail"`
+	LastRunAt       *time.Time `json:"last_run_at,omitempty"`
+}
+
+// HostFailureCount is per-host aggregated stats for a window.
+type HostFailureCount struct {
+	HostID      string  `json:"host_id"`
+	Total       int64   `json:"total"`
+	Failed      int64   `json:"failed"`
+	FailureRate float64 `json:"failure_rate"` // 0–100
+}
+
+// RecoveryEpisode is one failure-then-recovery sequence for a job.
+type RecoveryEpisode struct {
+	EpisodeStart    time.Time  `json:"episode_start"`
+	EpisodeEnd      time.Time  `json:"episode_end"`
+	FailureCount    int64      `json:"failure_count"`
+	RecoveredAt     *time.Time `json:"recovered_at,omitempty"`
+	RecoverySeconds *float64   `json:"recovery_seconds,omitempty"`
+}
+
+// JobRecoverySummary collects failure episodes and recovery statistics for one job.
+type JobRecoverySummary struct {
+	JobID               string            `json:"job_id"`
+	HostID              string            `json:"host_id"`
+	IsCurrentlyFailing  bool              `json:"is_currently_failing"`
+	CurrentEpisodeSince *time.Time        `json:"current_episode_since,omitempty"`
+	CurrentEpisodeFails int64             `json:"current_episode_fails,omitempty"`
+	LastRecoveredAt     *time.Time        `json:"last_recovered_at,omitempty"`
+	AvgRecoverySeconds  *float64          `json:"avg_recovery_seconds,omitempty"`
+	Episodes            []RecoveryEpisode `json:"episodes"`
 }

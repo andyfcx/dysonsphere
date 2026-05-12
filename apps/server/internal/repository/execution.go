@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +13,14 @@ import (
 
 	"github.com/andyfcx/observer/server/internal/domain"
 )
+
+// ExecutionFilter specifies optional filters for ListFiltered.
+type ExecutionFilter struct {
+	HostID string
+	JobID  string
+	Status string
+	Since  *time.Time
+}
 
 // ExecutionRepo handles persistence of Execution events.
 type ExecutionRepo struct {
@@ -91,6 +100,63 @@ func (r *ExecutionRepo) ListByJob(ctx context.Context, jobID string, limit int) 
 	`, jid, limit)
 	if err != nil {
 		return nil, fmt.Errorf("executions by job: %w", err)
+	}
+	defer rows.Close()
+	return collectExecutions(rows)
+}
+
+// ListFiltered returns paginated executions matching the given filter.
+// Zero-value filter fields are ignored.
+func (r *ExecutionRepo) ListFiltered(ctx context.Context, f ExecutionFilter, limit, offset int) ([]*domain.Execution, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	args := []any{}
+	conditions := []string{}
+	n := 1
+
+	if f.HostID != "" {
+		hid, err := uuid.Parse(f.HostID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid host_id: %w", err)
+		}
+		conditions = append(conditions, fmt.Sprintf("host_id = $%d", n))
+		args = append(args, hid)
+		n++
+	}
+	if f.JobID != "" {
+		jid, err := uuid.Parse(f.JobID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid job_id: %w", err)
+		}
+		conditions = append(conditions, fmt.Sprintf("job_id = $%d", n))
+		args = append(args, jid)
+		n++
+	}
+	if f.Status != "" {
+		conditions = append(conditions, fmt.Sprintf("status = $%d", n))
+		args = append(args, f.Status)
+		n++
+	}
+	if f.Since != nil {
+		conditions = append(conditions, fmt.Sprintf("created_at >= $%d", n))
+		args = append(args, *f.Since)
+		n++
+	}
+
+	q := `SELECT id, host_id, job_id, scheduled_at, detected_started_at,
+	             detected_finished_at, duration_seconds, status, confidence_score,
+	             detection_sources, evidence, created_at
+	      FROM executions`
+	if len(conditions) > 0 {
+		q += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	q += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", n, n+1)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("filtered executions: %w", err)
 	}
 	defer rows.Close()
 	return collectExecutions(rows)

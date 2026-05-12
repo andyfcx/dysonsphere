@@ -82,9 +82,11 @@ func run() error {
 	alertRepo := repository.NewAlertRepo(pool)
 	commandRepo := repository.NewCommandRepo(pool)
 	credentialRepo := repository.NewCredentialRepo(pool)
+	enrollmentTokenRepo := repository.NewEnrollmentTokenRepo(pool)
+	statsRepo := repository.NewStatsRepo(pool)
 
 	// Wire up services.
-	agentSvc := service.NewAgentService(hostRepo, credentialRepo, cfg.Server.EnrollmentToken)
+	agentSvc := service.NewAgentService(hostRepo, credentialRepo, enrollmentTokenRepo, cfg.Server.EnrollmentToken)
 	commandSvc := service.NewCommandService(commandRepo, jobRepo)
 	discoverySvc := service.NewDiscoveryService(jobRepo)
 	executionSvc := service.NewExecutionService(execRepo, jobRepo)
@@ -103,7 +105,8 @@ func run() error {
 	handler := api.NewHandler(
 		authManager,
 		agentSvc, commandSvc, discoverySvc, executionSvc, metricSvc,
-		hostRepo, jobRepo, alertRepo, execRepo,
+		hostRepo, jobRepo, alertRepo, execRepo, statsRepo,
+		cfg.Server.PublicURL,
 	)
 	router := api.NewRouter(handler)
 

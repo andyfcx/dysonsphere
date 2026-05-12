@@ -36,6 +36,25 @@ type AgentCredentialBlock struct {
 	Token string `json:"token"`
 }
 
+// EnrollmentTokenCreatedResponse is returned when a new enrollment token is generated.
+type EnrollmentTokenCreatedResponse struct {
+	ID        string `json:"id"`
+	Label     string `json:"label"`
+	Payload   string `json:"payload"`   // base64url-encoded JSON for agent --payload flag
+	ExpiresAt string `json:"expires_at"` // RFC3339
+	CreatedAt string `json:"created_at"`
+}
+
+// EnrollmentTokenItem is a list entry (never exposes the raw token).
+type EnrollmentTokenItem struct {
+	ID        string  `json:"id"`
+	Label     string  `json:"label"`
+	Used      bool    `json:"used"`
+	UsedAt    *string `json:"used_at,omitempty"`
+	ExpiresAt string  `json:"expires_at"`
+	CreatedAt string  `json:"created_at"`
+}
+
 type AgentConfigBlock struct {
 	Environment         string   `json:"environment"`
 	Tags                []string `json:"tags"`

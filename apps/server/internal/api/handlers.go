@@ -1,16 +1,31 @@
 package api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/andyfcx/observer/server/internal/repository"
 	"github.com/andyfcx/observer/server/internal/service"
 )
+
+// parseWindow converts the ?window= query param to a since time and bucket size.
+// Returns since time, label string, and bucket width in seconds.
+func parseWindow(r *http.Request) (since time.Time, label string, bucketSeconds int) {
+	switch r.URL.Query().Get("window") {
+	case "7d":
+		return time.Now().Add(-7 * 24 * time.Hour), "7d", 6 * 3600
+	case "30d":
+		return time.Now().Add(-30 * 24 * time.Hour), "30d", 86400
+	default:
+		return time.Now().Add(-24 * time.Hour), "24h", 3600
+	}
+}
 
 // Handler holds all service dependencies for HTTP handlers.
 type Handler struct {
@@ -24,6 +39,8 @@ type Handler struct {
 	jobs       *repository.JobRepo
 	alerts     *repository.AlertRepo
 	execs      *repository.ExecutionRepo
+	stats      *repository.StatsRepo
+	publicURL  string
 }
 
 func NewHandler(
@@ -37,6 +54,8 @@ func NewHandler(
 	jobs *repository.JobRepo,
 	alerts *repository.AlertRepo,
 	execs *repository.ExecutionRepo,
+	stats *repository.StatsRepo,
+	publicURL string,
 ) *Handler {
 	return &Handler{
 		auth:       auth,
@@ -49,6 +68,8 @@ func NewHandler(
 		jobs:       jobs,
 		alerts:     alerts,
 		execs:      execs,
+		stats:      stats,
+		publicURL:  publicURL,
 	}
 }
 
@@ -236,9 +257,21 @@ func (h *Handler) BatchExecutions(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListExecutions handles GET /api/v1/executions
+// Supports optional query params: status, host_id, job_id, window (24h|7d|30d).
 func (h *Handler) ListExecutions(w http.ResponseWriter, r *http.Request) {
 	limit, offset := parsePagination(r)
-	execs, err := h.executions.List(r.Context(), limit, offset)
+
+	f := repository.ExecutionFilter{
+		HostID: r.URL.Query().Get("host_id"),
+		JobID:  r.URL.Query().Get("job_id"),
+		Status: r.URL.Query().Get("status"),
+	}
+	if window := r.URL.Query().Get("window"); window != "" {
+		since, _, _ := parseWindow(r)
+		f.Since = &since
+	}
+
+	execs, err := h.execs.ListFiltered(r.Context(), f, limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list executions failed")
 		return
@@ -369,13 +402,10 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 	jobs, _ := h.jobs.List(ctx)
 	activeAlerts, _ := h.alerts.CountActive(ctx)
 
-	// Count recent failed executions in last 24h
-	execs, _ := h.execs.List(ctx, 200, 0)
+	ws, _ := h.stats.GetWindowStats(ctx, time.Now().Add(-24*time.Hour), "24h")
 	var recentFailed int64
-	for _, e := range execs {
-		if e.Status == "failed" || e.Status == "unknown" {
-			recentFailed++
-		}
+	if ws != nil {
+		recentFailed = ws.Failed + ws.Unknown
 	}
 
 	writeJSON(w, http.StatusOK, StatsResponse{
@@ -385,6 +415,129 @@ func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 		ActiveAlerts: activeAlerts,
 		RecentFailed: recentFailed,
 	})
+}
+
+// ── Analytics stats ────────────────────────────────────────────────────────
+
+// GetWindowStats handles GET /api/v1/stats/failures?window=24h|7d|30d
+func (h *Handler) GetWindowStats(w http.ResponseWriter, r *http.Request) {
+	since, label, _ := parseWindow(r)
+	ws, err := h.stats.GetWindowStats(r.Context(), since, label)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "stats query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, ws)
+}
+
+// GetFailureTrend handles GET /api/v1/stats/trend?window=24h|7d|30d
+func (h *Handler) GetFailureTrend(w http.ResponseWriter, r *http.Request) {
+	since, _, bucketSeconds := parseWindow(r)
+	trend, err := h.stats.GetFailureTrend(r.Context(), since, bucketSeconds)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "trend query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"trend": trend})
+}
+
+// GetJobStats handles GET /api/v1/stats/jobs?window=24h|7d|30d
+func (h *Handler) GetJobStats(w http.ResponseWriter, r *http.Request) {
+	since, _, _ := parseWindow(r)
+	rates, err := h.stats.GetJobSuccessRates(r.Context(), since)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "job stats query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"jobs": rates})
+}
+
+// GetHostStats handles GET /api/v1/stats/hosts?window=24h|7d|30d
+func (h *Handler) GetHostStats(w http.ResponseWriter, r *http.Request) {
+	since, _, _ := parseWindow(r)
+	counts, err := h.stats.GetHostFailureCounts(r.Context(), since)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "host stats query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"hosts": counts})
+}
+
+// GetRecoveryStats handles GET /api/v1/stats/recovery
+func (h *Handler) GetRecoveryStats(w http.ResponseWriter, r *http.Request) {
+	summaries, err := h.stats.GetJobRecoveryStats(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "recovery stats query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"jobs": summaries})
+}
+
+// ── Enrollment tokens ──────────────────────────────────────────────────────
+
+// CreateEnrollmentToken handles POST /api/v1/enrollment-tokens
+func (h *Handler) CreateEnrollmentToken(w http.ResponseWriter, r *http.Request) {
+	var req CreateEnrollmentTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	serverURL := req.ServerURL
+	if serverURL == "" {
+		serverURL = h.publicURL
+	}
+	if serverURL == "" {
+		writeError(w, http.StatusBadRequest, "server_url is required (set SERVER_PUBLIC_URL or pass server_url in body)")
+		return
+	}
+
+	rawToken, record, err := h.agents.GenerateEnrollmentToken(r.Context(), req.Label)
+	if err != nil {
+		slog.Error("generate enrollment token", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+
+	type payloadJSON struct {
+		ServerURL string `json:"server_url"`
+		Token     string `json:"token"`
+	}
+	payloadBytes, _ := json.Marshal(payloadJSON{ServerURL: serverURL, Token: rawToken})
+	payload := base64.RawURLEncoding.EncodeToString(payloadBytes)
+
+	writeJSON(w, http.StatusCreated, EnrollmentTokenCreatedResponse{
+		ID:        record.ID,
+		Label:     record.Label,
+		Payload:   payload,
+		ExpiresAt: record.ExpiresAt.Format(time.RFC3339),
+		CreatedAt: record.CreatedAt.Format(time.RFC3339),
+	})
+}
+
+// ListEnrollmentTokens handles GET /api/v1/enrollment-tokens
+func (h *Handler) ListEnrollmentTokens(w http.ResponseWriter, r *http.Request) {
+	tokens, err := h.agents.ListEnrollmentTokens(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list enrollment tokens failed")
+		return
+	}
+	items := make([]EnrollmentTokenItem, 0, len(tokens))
+	for _, t := range tokens {
+		item := EnrollmentTokenItem{
+			ID:        t.ID,
+			Label:     t.Label,
+			Used:      t.Used,
+			ExpiresAt: t.ExpiresAt.Format(time.RFC3339),
+			CreatedAt: t.CreatedAt.Format(time.RFC3339),
+		}
+		if t.UsedAt != nil {
+			s := t.UsedAt.Format(time.RFC3339)
+			item.UsedAt = &s
+		}
+		items = append(items, item)
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────

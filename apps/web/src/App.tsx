@@ -7,6 +7,8 @@ import Jobs from './pages/Jobs'
 import JobDetail from './pages/JobDetail'
 import Metrics from './pages/Metrics'
 import Alerts from './pages/Alerts'
+import Analytics from './pages/Analytics'
+import EnrollHost from './pages/EnrollHost'
 import Login from './pages/Login'
 import { getAuthToken, logout, subscribeAuthChanged } from './api/client'
 
@@ -14,8 +16,10 @@ const navItems = [
   { path: '/', label: 'Overview', icon: '⬡' },
   { path: '/hosts', label: 'Hosts', icon: '⬢' },
   { path: '/jobs', label: 'Jobs', icon: '◷' },
+  { path: '/analytics', label: 'Analytics', icon: '◎' },
   { path: '/metrics', label: 'Metrics', icon: '◈' },
   { path: '/alerts', label: 'Alerts', icon: '◉' },
+  { path: '/enroll', label: 'Enroll Host', icon: '＋' },
 ]
 
 export default function App() {
@@ -73,8 +77,10 @@ export default function App() {
           <Route path="/hosts" element={<Hosts />} />
           <Route path="/jobs" element={<Jobs />} />
           <Route path="/jobs/:id" element={<JobDetail />} />
+          <Route path="/analytics" element={<Analytics />} />
           <Route path="/metrics" element={<Metrics />} />
           <Route path="/alerts" element={<Alerts />} />
+          <Route path="/enroll" element={<EnrollHost />} />
         </Routes>
       </main>
     </div>

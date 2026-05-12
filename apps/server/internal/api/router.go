@@ -64,6 +64,15 @@ func NewRouter(h *Handler) http.Handler {
 		r.Get("/jobs/{id}", h.GetJob)
 		r.Get("/alerts", h.ListAlerts)
 		r.Get("/stats", h.GetStats)
+		r.Get("/stats/failures", h.GetWindowStats)
+		r.Get("/stats/trend", h.GetFailureTrend)
+		r.Get("/stats/jobs", h.GetJobStats)
+		r.Get("/stats/hosts", h.GetHostStats)
+		r.Get("/stats/recovery", h.GetRecoveryStats)
+
+		// Enrollment token management (dashboard only)
+		r.Post("/enrollment-tokens", h.CreateEnrollmentToken)
+		r.Get("/enrollment-tokens", h.ListEnrollmentTokens)
 	})
 
 	return r

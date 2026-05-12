@@ -155,6 +155,13 @@ type TriggerJobsRequest struct {
 	JobIDs []string `json:"job_ids"`
 }
 
+// ── Enrollment tokens ──────────────────────────────────────────────────────
+
+type CreateEnrollmentTokenRequest struct {
+	Label     string `json:"label"`
+	ServerURL string `json:"server_url"`
+}
+
 type CompleteCommandRequest struct {
 	Status     string     `json:"status"`
 	Message    string     `json:"message"`

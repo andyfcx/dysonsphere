@@ -4,6 +4,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -58,18 +60,39 @@ func main() {
 }
 
 func initCmd() *cobra.Command {
-	var serverURL, configOut, stateFile, tokenFile, enrollmentToken string
+	var serverURL, configOut, stateFile, tokenFile, enrollmentToken, payload string
 
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Enroll this host with the central server and write agent config",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if payload != "" {
+				type enrollPayload struct {
+					ServerURL string `json:"server_url"`
+					Token     string `json:"token"`
+				}
+				raw, err := base64.RawURLEncoding.DecodeString(payload)
+				if err != nil {
+					return fmt.Errorf("invalid --payload (not valid base64): %w", err)
+				}
+				var p enrollPayload
+				if err := json.Unmarshal(raw, &p); err != nil {
+					return fmt.Errorf("invalid --payload (bad JSON): %w", err)
+				}
+				if serverURL == "" {
+					serverURL = p.ServerURL
+				}
+				if enrollmentToken == "" {
+					enrollmentToken = p.Token
+				}
+			}
 			return interactiveInit(serverURL, enrollmentToken, configOut, stateFile, tokenFile)
 		},
 	}
 
 	cmd.Flags().StringVar(&serverURL, "server", "", "Observer server URL")
 	cmd.Flags().StringVar(&enrollmentToken, "enrollment-token", "", "Enrollment token (skips interactive prompt)")
+	cmd.Flags().StringVar(&payload, "payload", "", "Enrollment payload from dashboard (base64, contains server URL + token)")
 	cmd.Flags().StringVar(&configOut, "config-out", defaultConfigPath, "Path to write config file")
 	cmd.Flags().StringVar(&stateFile, "state-file", "/var/lib/observer-agent/state.db", "Path for local state db")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "", "Path to write formal agent credential")
