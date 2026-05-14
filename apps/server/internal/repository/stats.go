@@ -23,19 +23,20 @@ func NewStatsRepo(db *pgxpool.Pool) *StatsRepo {
 func (r *StatsRepo) GetWindowStats(ctx context.Context, since time.Time, label string) (*domain.WindowStats, error) {
 	row := r.db.QueryRow(ctx, `
 		SELECT
-			COUNT(*)                                        AS total,
-			COUNT(*) FILTER (WHERE status = 'success')     AS success,
-			COUNT(*) FILTER (WHERE status = 'failed')      AS failed,
-			COUNT(*) FILTER (WHERE status = 'unknown')     AS unknown,
-			COUNT(*) FILTER (WHERE status = 'missed')      AS missed
+			COUNT(*)                                         AS total,
+			COUNT(*) FILTER (WHERE status = 'success')      AS success,
+			COUNT(*) FILTER (WHERE status = 'failed')       AS failed,
+			COUNT(*) FILTER (WHERE status = 'partial')      AS partial,
+			COUNT(*) FILTER (WHERE status = 'unknown')      AS unknown,
+			COUNT(*) FILTER (WHERE status = 'missed')       AS missed
 		FROM executions
-		WHERE created_at >= $1
+		WHERE created_at >= $1 AND status != 'running'
 	`, since)
 
 	var s domain.WindowStats
 	s.Window = label
 	s.Since = since.UTC().Format(time.RFC3339)
-	if err := row.Scan(&s.Total, &s.Success, &s.Failed, &s.Unknown, &s.Missed); err != nil {
+	if err := row.Scan(&s.Total, &s.Success, &s.Failed, &s.Partial, &s.Unknown, &s.Missed); err != nil {
 		return nil, fmt.Errorf("window stats: %w", err)
 	}
 	if s.Total > 0 {
@@ -50,12 +51,12 @@ func (r *StatsRepo) GetFailureTrend(ctx context.Context, since time.Time, bucket
 	rows, err := r.db.Query(ctx, `
 		SELECT
 			to_timestamp(floor(extract(epoch from created_at) / $2) * $2) AS bucket,
-			COUNT(*)                                        AS total,
-			COUNT(*) FILTER (WHERE status = 'success')     AS success,
-			COUNT(*) FILTER (WHERE status = 'failed')      AS failed,
-			COUNT(*) FILTER (WHERE status = 'unknown')     AS unknown
+			COUNT(*)                                         AS total,
+			COUNT(*) FILTER (WHERE status = 'success')      AS success,
+			COUNT(*) FILTER (WHERE status = 'failed')       AS failed,
+			COUNT(*) FILTER (WHERE status IN ('unknown','partial')) AS unknown
 		FROM executions
-		WHERE created_at >= $1
+		WHERE created_at >= $1 AND status != 'running'
 		GROUP BY 1
 		ORDER BY 1
 	`, since, float64(bucketSeconds))
@@ -90,7 +91,7 @@ func (r *StatsRepo) GetJobSuccessRates(ctx context.Context, since time.Time) ([]
 		FROM executions e
 		JOIN jobs j ON j.id = e.job_id
 		LEFT JOIN current_job_states cjs ON cjs.job_id = e.job_id
-		WHERE e.created_at >= $1 AND e.job_id IS NOT NULL
+		WHERE e.created_at >= $1 AND e.job_id IS NOT NULL AND e.status != 'running'
 		GROUP BY e.job_id, j.host_id, cjs.consecutive_fail
 		ORDER BY COUNT(*) FILTER (WHERE e.status = 'failed') DESC, total DESC
 	`, since)
@@ -126,7 +127,7 @@ func (r *StatsRepo) GetHostFailureCounts(ctx context.Context, since time.Time) (
 			COUNT(*)                                    AS total,
 			COUNT(*) FILTER (WHERE status = 'failed')  AS failed
 		FROM executions
-		WHERE created_at >= $1
+		WHERE created_at >= $1 AND status != 'running'
 		GROUP BY host_id
 		ORDER BY failed DESC, total DESC
 	`, since)
