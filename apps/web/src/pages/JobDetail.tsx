@@ -1,9 +1,39 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useParams, Link } from 'react-router-dom'
 import { api, Execution } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
 import TimeAgo from '../components/TimeAgo'
+
+function LogBlock({ text }: { text: string }) {
+  const preRef = useRef<HTMLPreElement>(null)
+  useEffect(() => {
+    if (preRef.current) {
+      preRef.current.scrollTop = preRef.current.scrollHeight
+    }
+  }, [])
+  return (
+    <pre
+      ref={preRef}
+      style={{
+        margin: 0,
+        padding: '12px 16px',
+        background: 'var(--bg3)',
+        fontFamily: 'monospace',
+        fontSize: 12,
+        lineHeight: 1.6,
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-all',
+        maxHeight: 400,
+        overflowY: 'auto',
+        color: 'var(--text)',
+        borderTop: '1px solid var(--border)',
+      }}
+    >
+      {text}
+    </pre>
+  )
+}
 
 export default function JobDetail() {
   const { id } = useParams<{ id: string }>()
@@ -131,22 +161,7 @@ export default function JobDetail() {
                       {isOpen && e.output_text && (
                         <tr key={`${e.id}-log`}>
                           <td colSpan={8} style={{ padding: 0, borderBottom: '1px solid var(--border)' }}>
-                            <pre style={{
-                              margin: 0,
-                              padding: '12px 16px',
-                              background: 'var(--bg3)',
-                              fontFamily: 'monospace',
-                              fontSize: 12,
-                              lineHeight: 1.6,
-                              whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-all',
-                              maxHeight: 400,
-                              overflowY: 'auto',
-                              color: 'var(--text)',
-                              borderTop: '1px solid var(--border)',
-                            }}>
-                              {e.output_text}
-                            </pre>
+                            <LogBlock text={e.output_text} />
                           </td>
                         </tr>
                       )}
